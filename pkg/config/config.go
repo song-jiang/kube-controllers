@@ -18,6 +18,11 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
+const (
+	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA = "backend-data"
+	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE = "backend-type"
+)
+
 type Config struct {
 	// Minimum log level to emit.
 	LogLevel string `default:"info" split_words:"true"`
@@ -29,13 +34,14 @@ type Config struct {
 	CompactionPeriod string `default:"10m" split_words:"true"`
 
 	// Which controllers to run.
-	EnabledControllers string `default:"node,policy,namespace,workloadendpoint,serviceaccount" split_words:"true"`
+	EnabledControllers string `default:"node,policy,namespace,workloadendpoint,serviceaccount,flannelmigration" split_words:"true"`
 
 	// Number of workers to run for each controller.
 	WorkloadEndpointWorkers int `default:"1" split_words:"true"`
 	ProfileWorkers          int `default:"1" split_words:"true"`
 	PolicyWorkers           int `default:"1" split_words:"true"`
 	NodeWorkers             int `default:"1" split_words:"true"`
+	FlannelMigrationWorkers int `default:"1" split_words:"true"`
 
 	// Path to a kubeconfig file to use for accessing the k8s API.
 	Kubeconfig string `default:"" split_words:"false"`

@@ -43,6 +43,7 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/node"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/pod"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/serviceaccount"
+	"github.com/projectcalico/kube-controllers/pkg/controllers/flannelmigration"
 	"github.com/projectcalico/kube-controllers/pkg/status"
 )
 
@@ -153,6 +154,19 @@ func main() {
 			controllerCtrl.controllerStates["ServiceAccount"] = &controllerState{
 				controller:  serviceAccountController,
 				threadiness: config.ProfileWorkers,
+			}
+		case "flannelmigration":
+			// Attempt to load Flannel configuration.
+			flannelConfig := new(flannelmigration.Config)
+			if err := flannelConfig.Parse(); err != nil {
+				log.WithError(err).Fatal("Failed to parse Flannel config")
+			}
+			log.WithField("flannelConfig", flannelConfig).Info("Loaded Flannel configuration from environment")
+
+			flannelMigrationController := flannelmigration.NewFlannelMigrationController(ctx, k8sClientset, calicoClient, flannelConfig)
+			controllerCtrl.controllerStates["FlannelMigration"] = &controllerState{
+				controller:  flannelMigrationController,
+				threadiness: config.FlannelMigrationWorkers,
 			}
 		default:
 			log.Fatalf("Invalid controller '%s' provided.", controllerType)
