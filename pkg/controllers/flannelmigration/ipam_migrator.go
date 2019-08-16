@@ -232,6 +232,7 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 // createIPPool creates an IP pool using the specified CIDR.
 // If the pool already exists, normally this indicates migration controller restarted, check if it is a still valid pool we can use.
 func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr *cnet.IPNet, isNATOutgoingEnabled bool) error {
+	// TODO: need to set the size for IPAM block based on nodePodCIDR. default /26
 	pool := &api.IPPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: DEFAULT_IPV4_POOL_NAME,

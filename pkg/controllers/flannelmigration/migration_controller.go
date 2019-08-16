@@ -21,7 +21,7 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	log "github.com/sirupsen/logrus"
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -97,7 +97,7 @@ func NewFlannelMigrationController(ctx context.Context, k8sClientset *kubernetes
 }
 
 // Run starts the migration controller. It does start-of-day preparation
-// and then run entire migration process. We ignore reconcilerPeriod, threadiness and stopCh.
+// and then run entire migration process. We ignore reconcilerPeriod and threadiness.
 func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod string, stopCh chan struct{}) {
 	defer uruntime.HandleCrash()
 
@@ -160,13 +160,28 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 		return
 	}
 
+	<-stopCh
 	log.Info("Stopping Migration controller")
 }
 
 // For new node, setup Calico IPAM based on node pod CIDR and update node selector.
 // This makes sure a new node get Calico installed in the middle of migration process.
 func (c *flannelMigrationController) processNewNode(node *v1.Node) {
-	err := c.ipamMigrator.SetupCalicoIPAMForNode(node)
+	// Do not process any new node unless nodes are in sync .
+	for !c.informer.HasSynced() {
+		return
+	}
+
+	// Defensively check node label again to make sure it is the node has not been processed by anyone.
+	_, err := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
+	if err == nil {
+		// Node got label already. Skip it.
+		log.Infof("New node %s has been processed.", node.Name)
+		return
+	}
+
+	log.Infof("Start processing new node %s.", node.Name)
+	err = c.ipamMigrator.SetupCalicoIPAMForNode(node)
 	if err != nil {
 		log.WithError(err).Fatalf("Error running ipam migration for new node %s.", node.Name)
 		return
@@ -178,6 +193,7 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 		return
 	}
 
+	log.Infof("Complete processing new node %s.", node.Name)
 	return
 }
 
@@ -203,7 +219,7 @@ func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
 func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, error) {
 	nodes := []*v1.Node{}
 
-	// A node can be in different migration status indicated by the value of label projectcalico.org/node-network-during-migration.
+	// A node can be in different migration status indicated by the value of label "projectcalico.org/node-network-during-migration".
 	// case 1. No label at all.
 	//         This is the first time migration controller starts. The node is running Flannel.
 	//         Or in rare cases, the node is a new node added between two separate migration processes. e.g. migration controller restarted.
@@ -220,18 +236,15 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 	for _, obj := range items {
 		node := obj.(*v1.Node)
 
-		val, err := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
-		if err != nil {
-			log.WithError(err).Errorf("Error getting label for node %s.", node.Name)
-			return nodes, err
-		}
-
+		val, _ := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
 		if val != "calico" {
 			addNodeLabels(c.k8sClientset, node, nodeNetworkFlannel)
 			nodes = append(nodes, node)
 		}
 	}
 
+	// At this point, any node would have a "projectcalico.org/node-network-during-migration" lable.
+	// The value is either "flannel" or "calico".
 	// Start IPAM migration.
 	err := c.ipamMigrator.MigrateNodes(nodes)
 	if err != nil {

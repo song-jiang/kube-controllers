@@ -112,7 +112,7 @@ func addNodeLabels(k8sClientset *kubernetes.Clientset, node *v1.Node, labels map
 }
 
 // Get value of a node label.
-// If node does not have that label, return error.
+// If node does not have that label, return empty string and error.
 func getNodeLabelValue(k8sClientset *kubernetes.Clientset, node *v1.Node, key string) (string, error) {
 	currentVal, ok := node.Labels[key]
 	if !ok {
