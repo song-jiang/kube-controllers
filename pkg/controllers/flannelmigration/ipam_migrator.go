@@ -271,7 +271,7 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 				}
 			}
 			if defaultPool.Spec.NATOutgoing != isNATOutgoingEnabled {
-				log.Errorf("Failed to validate existing default IPv4 IP pool (old NAT outgoing: %s, new NAT outgoing %s)", defaultPool.Spec.NATOutgoing, isNATOutgoingEnabled)
+				log.Errorf("Failed to validate existing default IPv4 IP pool (old NAT outgoing: %t, new NAT outgoing %t)", defaultPool.Spec.NATOutgoing, isNATOutgoingEnabled)
 				return cerrors.ErrorValidation{
 					ErroredFields: []cerrors.ErroredField{{
 						Name:   "Spec.NATOutgoing",

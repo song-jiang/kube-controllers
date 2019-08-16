@@ -21,7 +21,7 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -217,6 +217,7 @@ func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
 // Start ipam migration.
 // This is to make sure Calico IPAM has been setup for the entire cluster.
 // Return a list of nodes which has been processed successfully and should move on to next stage.
+// If there is any error, return empty list.
 func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, error) {
 	nodes := []*v1.Node{}
 
@@ -239,7 +240,10 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 
 		val, _ := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
 		if val != "calico" {
-			addNodeLabels(c.k8sClientset, node, nodeNetworkFlannel)
+			if err := addNodeLabels(c.k8sClientset, node, nodeNetworkFlannel); err != nil {
+				log.WithError(err).Errorf("Error adding node label to node %s.", node.Name)
+				return []*v1.Node{}, err
+			}
 			nodes = append(nodes, node)
 		}
 	}
