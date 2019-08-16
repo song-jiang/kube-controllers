@@ -133,11 +133,11 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 
 	// Wait till k8s cache is synced
 	go c.informer.Run(stopCh)
-	log.Debug("Waiting to sync with Kubernetes API (Nodes)")
+	log.Infof("Waiting to sync with Kubernetes API (Nodes)")
 	for !c.informer.HasSynced() {
 		time.Sleep(100 * time.Millisecond)
 	}
-	log.Debug("Finished syncing with Kubernetes API (Nodes)")
+	log.Infof("Finished syncing with Kubernetes API (Nodes)")
 
 	// Run IPAM migration. Get list of nodes need to be migrated.
 	c.flannelNodes, err = c.runIpamMigrationForNodes()
@@ -167,12 +167,13 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 // For new node, setup Calico IPAM based on node pod CIDR and update node selector.
 // This makes sure a new node get Calico installed in the middle of migration process.
 func (c *flannelMigrationController) processNewNode(node *v1.Node) {
-	// Do not process any new node unless nodes are in sync .
-	for !c.informer.HasSynced() {
+	// Do not process any new node unless existing nodes been processed.
+	for len(c.flannelNodes) == 0 {
+		log.Debugf("New node %s skipped.", node.Name)
 		return
 	}
 
-	// Defensively check node label again to make sure it is the node has not been processed by anyone.
+	// Defensively check node label again to make sure the node has not been processed by anyone.
 	_, err := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
 	if err == nil {
 		// Node got label already. Skip it.
