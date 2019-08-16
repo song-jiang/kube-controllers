@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/projectcalico/kube-controllers/pkg/config"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 
 	v1 "k8s.io/api/core/v1"
@@ -35,8 +34,10 @@ import (
 )
 
 const (
-	DEFAULT_IPV4_POOL_NAME           = "default-ipv4-ippool"
-	DEFAULT_FELIX_CONFIGURATION_NAME = "default"
+	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA = "backend-data"
+	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE = "backend-type"
+	DEFAULT_IPV4_POOL_NAME                   = "default-ipv4-ippool"
+	DEFAULT_FELIX_CONFIGURATION_NAME         = "default"
 )
 
 // IPAMMigrator responsible for migrating host-local IPAM to Calico IPAM.
@@ -105,7 +106,7 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 	// Get Flannel vxlan setup from node annotations. An example is
 	// flannel.alpha.coreos.com/backend-data: '{"VtepMAC":"56:1d:8d:30:79:97"}'
 	// flannel.alpha.coreos.com/backend-type: vxlan
-	backendType, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+config.FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE]
+	backendType, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend type", node.Name)
 	}
@@ -113,7 +114,7 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 		return fmt.Errorf("node %s got wrong Flannel backend type %s", node.Name, backendType)
 	}
 
-	backendData, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+config.FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA]
+	backendData, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend data", node.Name)
 	}

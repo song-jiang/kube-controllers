@@ -18,11 +18,6 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-const (
-	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA = "backend-data"
-	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE = "backend-type"
-)
-
 type Config struct {
 	// Minimum log level to emit.
 	LogLevel string `default:"info" split_words:"true"`
