@@ -240,7 +240,6 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 // createIPPool creates an IP pool using the specified CIDR.
 // If the pool already exists, normally this indicates migration controller restarted, check if it is a still valid pool we can use.
 func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr *cnet.IPNet, blockSize int, isNATOutgoingEnabled bool) error {
-	// TODO: need to set the size for IPAM block based on nodePodCIDR. default /26
 	pool := &api.IPPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: DEFAULT_IPV4_POOL_NAME,
@@ -254,7 +253,7 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 		},
 	}
 
-	log.Infof("Ensure default IPv4 pool is created with VXLAN.")
+	log.Infof("Ensure default IPv4 pool (cidr %s, blockSize %d, nat %t).", cidr.String(), blockSize, isNATOutgoingEnabled)
 
 	// Create the pool.
 	// Validate if pool already exists.
@@ -270,28 +269,23 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 			}
 
 			// Check if existing ip pool is valid.
-			if defaultPool.Spec.CIDR != cidr.String() {
-				log.Errorf("Failed to validate existing default IPv4 IP pool (old CIDR: %s, new CIDR %s)", defaultPool.Spec.CIDR, cidr.String())
+			if defaultPool.Spec.CIDR != cidr.String() ||
+				defaultPool.Spec.BlockSize != blockSize ||
+				defaultPool.Spec.NATOutgoing != isNATOutgoingEnabled ||
+				defaultPool.Spec.VXLANMode != api.VXLANModeAlways {
+				log.Errorf("Failed to validate existing default IPv4 IP pool %+v", defaultPool.Spec)
 				return cerrors.ErrorValidation{
 					ErroredFields: []cerrors.ErroredField{{
-						Name:   "Spec.CIDR",
-						Reason: "Found existing default ippool with different pod CIDR",
+						Name:   "pool.Spec",
+						Reason: "Failed to validate existing default IPv4 IP pool",
 					}},
 				}
 			}
-			if defaultPool.Spec.NATOutgoing != isNATOutgoingEnabled {
-				log.Errorf("Failed to validate existing default IPv4 IP pool (old NAT outgoing: %t, new NAT outgoing %t)", defaultPool.Spec.NATOutgoing, isNATOutgoingEnabled)
-				return cerrors.ErrorValidation{
-					ErroredFields: []cerrors.ErroredField{{
-						Name:   "Spec.NATOutgoing",
-						Reason: "Found existing default ippool with different NATOutgoing",
-					}},
-				}
-			}
-			log.Infof("Use existing default IPv4 pool (%s) with VXLAN and NAT outgoing %t.", cidr, isNATOutgoingEnabled)
+
+			log.Info("Use existing default IPv4 pool.")
 		}
 	} else {
-		log.Infof("Created default IPv4 pool (%s) with VXLAN and NAT outgoing %t.", cidr, isNATOutgoingEnabled)
+		log.Info("Created default IPv4 pool.")
 	}
 
 	return nil
