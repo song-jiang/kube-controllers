@@ -35,6 +35,7 @@ type Config struct {
 
 	// FlannelMTU is the mtu used by flannel vxlan tunnel interface.
 	// For example, if flannel VNI is 1, this number can be obtained by running "ip -d link show flannel.1" on one of the host.
+	// Alternatively, it is "FLANNEL_MTU" value of /run/flannel/subnet.env file on the node.
 	// This is a mandatory config item.
 	FlannelMTU int `default:"0" split_words:"true"`
 
@@ -45,6 +46,10 @@ type Config struct {
 	// FlannelIPMasq should has same value as Flannel "ip-masq" commandline option.
 	// This option indicates if IP masquerade is enabled for traffic destined for outside the flannel network.
 	FlannelIPMasq bool `default:"true" split_words:"true"`
+
+	// FlannelSubnetLen should has same value as Flannel "SubnetLen" configuration option.
+	// It is the size of the subnet allocated to each host. Default value is 24.
+	FlannelSubnetLen int `default:"24" split_words:"true"`
 
 	// FlannelAnnotationPrefix should has same value as Flannel "kube-annotation-prefix" commandline option.
 	FlannelAnnotationPreifx string `default:"flannel.alpha.coreos.com" split_words:"true"`

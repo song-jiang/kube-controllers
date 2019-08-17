@@ -38,6 +38,7 @@ const (
 	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE = "backend-type"
 	DEFAULT_IPV4_POOL_NAME                   = "default-ipv4-ippool"
 	DEFAULT_FELIX_CONFIGURATION_NAME         = "default"
+	DEFAULT_IPPOOL_SIZE                      = 26
 )
 
 // IPAMMigrator responsible for migrating host-local IPAM to Calico IPAM.
@@ -69,8 +70,15 @@ func (m ipamMigrator) InitialiseIPPoolAndFelixConfig() error {
 		return fmt.Errorf("Failed to parse the CIDR '%s'", m.config.FlannelNetwork)
 	}
 
-	// Creating default ippool with vxlan enabled also creating a global felix configuration.
-	err = createDefaultVxlanIPPool(m.ctx, m.calicoClient, cidr, m.config.FlannelIPMasq)
+	// Based on FlannelSubnetLen, work out the size of ippool.
+	blockSize := DEFAULT_IPPOOL_SIZE
+	if m.config.FlannelSubnetLen > DEFAULT_IPPOOL_SIZE {
+		// Flannel subnet is smaller than one Calico IPAM block with default size of /26.
+		blockSize = m.config.FlannelSubnetLen
+	}
+
+	// Creating default ippool with vxlan enabled will also create a global felix configuration.
+	err = createDefaultVxlanIPPool(m.ctx, m.calicoClient, cidr, blockSize, m.config.FlannelIPMasq)
 	if err != nil {
 		return fmt.Errorf("Failed to create default ippool")
 	}
@@ -231,7 +239,7 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 
 // createIPPool creates an IP pool using the specified CIDR.
 // If the pool already exists, normally this indicates migration controller restarted, check if it is a still valid pool we can use.
-func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr *cnet.IPNet, isNATOutgoingEnabled bool) error {
+func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr *cnet.IPNet, blockSize int, isNATOutgoingEnabled bool) error {
 	// TODO: need to set the size for IPAM block based on nodePodCIDR. default /26
 	pool := &api.IPPool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -239,6 +247,7 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 		},
 		Spec: api.IPPoolSpec{
 			CIDR:        cidr.String(),
+			BlockSize:   blockSize,
 			NATOutgoing: isNATOutgoingEnabled,
 			IPIPMode:    api.IPIPModeNever,
 			VXLANMode:   api.VXLANModeAlways,
