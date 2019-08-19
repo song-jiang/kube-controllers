@@ -257,7 +257,7 @@ func deletePodsForNode(k8sClientset *kubernetes.Clientset, nodeName string, filt
 	for _, pod := range podList.Items {
 		if filter(&pod) {
 			err = k8sClientset.CoreV1().Pods(pod.Namespace).Delete(pod.Name, &metav1.DeleteOptions{})
-			if err != nil {
+			if err != nil && !apierrs.IsNotFound(err) {
 				return err
 			}
 		}

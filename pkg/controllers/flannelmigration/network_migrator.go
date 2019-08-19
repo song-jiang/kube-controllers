@@ -128,9 +128,6 @@ func (n *networkMigrator) SetupCalicoNetworkForNode(node *v1.Node) error {
 	// Set node label so that Calico node pod start to run on this node.
 	// This will install Calico CNI configuration file.
 	// It will take the preference over Flannel CNI config or Canal CNI config.
-	// After this point, on rare occasions, any new pod (daemonset pod or pod with nodeName selector)
-	// created on this node starts to use Calico CNI. Since Flannel tunnel device still exists and occupies VNI/Port,
-	// Calico CNI will fail. This is fine since we will delete those pods at late stage.
 	err = addNodeLabels(n.k8sClientset, node, nodeNetworkCalico)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node label to enable Calico network for node %s.", node.Name)
@@ -138,6 +135,10 @@ func (n *networkMigrator) SetupCalicoNetworkForNode(node *v1.Node) error {
 	}
 
 	// Calico daemonset pod should be running now.
+	// TODO
+
+	// Uncordon node.
+	//TODO
 
 
 	return nil
