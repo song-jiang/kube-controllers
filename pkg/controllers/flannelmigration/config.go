@@ -62,6 +62,9 @@ type Config struct {
 
 	// Name of Calico daemonset in kube-system namespace. Default is "calico-node".
 	CalicoDaemonsetName string `default:"calico-node" split_words:"true"`
+
+	// CNI config directory. The full path of the directory in which to search for CNI config files. Default: /etc/cni/net.d
+	CNIConfigDir string `default:"/etc/cni/net.d" split_words:"true"`
 }
 
 // Parse parses envconfig and stores in Config struct.

@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	NAMESPACE_KUBE_SYSEM        = "kube-system"
+	NAMESPACE_KUBE_SYSTEM        = "kube-system"
 	MIGRATION_NODE_SELECTOR_KEY = "projectcalico.org/node-network-during-migration"
 )
 
@@ -45,6 +45,8 @@ var (
 	// nodeNetworkCalico is a map value indicates a node is becoming part of Calico vxlan network.
 	// This is used both as a nodeSelector for Calico daemonset and a label for a node.
 	nodeNetworkCalico = map[string]string{MIGRATION_NODE_SELECTOR_KEY: "calico"}
+	// nodeNetworkUnknown is a map value indicates a node is running network migration.
+	nodeNetworkUnknown = map[string]string{MIGRATION_NODE_SELECTOR_KEY: "unknown"}
 )
 
 // flannelMigrationController implements the Controller interface.
@@ -59,7 +61,7 @@ type flannelMigrationController struct {
 	ipamMigrator ipamMigrator
 
 	// networkMigrator runs network migration process.
-	networkMigrator networkMigrator
+	networkMigrator *networkMigrator
 
 	// List of nodes need to be migrated.
 	flannelNodes []*v1.Node
@@ -118,7 +120,7 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	// First step is to add node selector "projectcalico.org/node-network-during-migration==flannel" to Flannel daemonset.
 	// This would prevent Flannel pod running on any new nodes or a node which has been migrated to Calico network.
 	d := daemonset(c.config.FlannelDaemonsetName)
-	err = d.AddNodeSelector(c.k8sClientset, NAMESPACE_KUBE_SYSEM, nodeNetworkFlannel)
+	err = d.AddNodeSelector(c.k8sClientset, NAMESPACE_KUBE_SYSTEM, nodeNetworkFlannel)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node selector to Flannel daemonset.")
 		return
@@ -200,14 +202,27 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 
 // Check if controller should start migration process.
 func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
+	// Check Flannel daemonset.
 	d := daemonset(c.config.FlannelDaemonsetName)
-	notFound, err := d.CheckNotExists(c.k8sClientset, NAMESPACE_KUBE_SYSEM)
+	notFound, err := d.CheckNotExists(c.k8sClientset, NAMESPACE_KUBE_SYSTEM)
 	if err != nil {
 		return false, err
 	}
 
 	if notFound {
 		log.Info("Flannel daemonset not exists, no migration process is needed.")
+		return false, nil
+	}
+
+	// Check Calico daemonet
+	d = daemonset(c.config.CalicoDaemonsetName)
+	notFound, err = d.CheckNotExists(c.k8sClientset, NAMESPACE_KUBE_SYSTEM)
+	if err != nil {
+		return false, err
+	}
+
+	if notFound {
+		log.Info("Calico daemonset not exists, can not start migration process.")
 		return false, nil
 	}
 
