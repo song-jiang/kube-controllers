@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	NAMESPACE_KUBE_SYSTEM        = "kube-system"
+	NAMESPACE_KUBE_SYSTEM       = "kube-system"
 	MIGRATION_NODE_SELECTOR_KEY = "projectcalico.org/node-network-during-migration"
 )
 
@@ -149,7 +149,7 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	}
 
 	// Start network migration.
-	err = c.runNetworkMigration()
+	err = c.runNetworkMigrationForNodes()
 	if err != nil {
 		log.WithError(err).Errorf("Error running network migration.")
 		return
@@ -214,15 +214,17 @@ func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
 		return false, nil
 	}
 
-	// Check Calico daemonet
-	d = daemonset(c.config.CalicoDaemonsetName)
-	notFound, err = d.CheckNotExists(c.k8sClientset, NAMESPACE_KUBE_SYSTEM)
+	// Initialise IPAM migrator.
+	err = c.ipamMigrator.Initialise()
 	if err != nil {
-		return false, err
+		log.Info("IPAM migrator initialisation failed.")
+		return false, nil
 	}
 
-	if notFound {
-		log.Info("Calico daemonset not exists, can not start migration process.")
+	// Initialise network migrator.
+	err = c.networkMigrator.Initialise()
+	if err != nil {
+		log.Info("Network migrator initialisation failed.")
 		return false, nil
 	}
 
@@ -275,14 +277,12 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 	return nodes, nil
 }
 
-// ToDo.
-func (c *flannelMigrationController) runNetworkMigration() error {
-	// Run network migration for each Flannel nodes.
-	return nil
+// For each Flannel nodes, run network migration process.
+func (c *flannelMigrationController) runNetworkMigrationForNodes() error {
+	return c.networkMigrator.MigrateNodes(c.flannelNodes)
 }
 
 // ToDO.
 func (c *flannelMigrationController) completeMigration() error {
-	// Complete migration process.
 	return nil
 }

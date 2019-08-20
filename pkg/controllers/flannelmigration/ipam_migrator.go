@@ -61,6 +61,12 @@ func NewIPAMMigrator(ctx context.Context, k8sClientset *kubernetes.Clientset, ca
 	}
 }
 
+// Initialise IPAM migrator.
+// Currently do nothing, no initialization steps needed.
+func (m ipamMigrator) Initialise() error {
+	return nil
+}
+
 // Create and initialise default Calico IPPool if not exists.
 // Update default FelixConfiguration with Flannel VNI and vxlan port.
 func (m ipamMigrator) InitialiseIPPoolAndFelixConfig() error {
@@ -160,8 +166,8 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 // MigrateNodes setup Calico IPAM for array of nodes.
 func (m ipamMigrator) MigrateNodes(nodes []*v1.Node) error {
 	log.Infof("Start IPAM migration process for %d nodes.", len(nodes))
-	for _, n := range nodes {
-		err := m.SetupCalicoIPAMForNode(n)
+	for _, node := range nodes {
+		err := m.SetupCalicoIPAMForNode(node)
 		if err != nil {
 			return err
 		}
