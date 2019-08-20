@@ -190,7 +190,8 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 		return
 	}
 
-	err = addNodeLabels(c.k8sClientset, node, nodeNetworkCalico)
+	n := k8snode(node.Name)
+	err = n.addNodeLabels(c.k8sClientset, nodeNetworkCalico)
 	if err != nil {
 		log.WithError(err).Fatalf("Error adding node label to enable Calico network for new node %s.", node.Name)
 		return
@@ -257,7 +258,8 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 
 		val, _ := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
 		if val != "calico" {
-			if err := addNodeLabels(c.k8sClientset, node, nodeNetworkFlannel); err != nil {
+			n := k8snode(node.Name)
+			if err := n.addNodeLabels(c.k8sClientset, nodeNetworkFlannel); err != nil {
 				log.WithError(err).Errorf("Error adding node label to node %s.", node.Name)
 				return []*v1.Node{}, err
 			}

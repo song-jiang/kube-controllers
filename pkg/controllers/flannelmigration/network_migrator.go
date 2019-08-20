@@ -71,14 +71,8 @@ func (m *networkMigrator) Initialise() error {
 	}
 	m.calicoCNIConfigName = cniConf
 
+	log.Infof("Network migrator initialised, container image %s, CNI config %s/%s.", m.calicoImage, m.config.CNIConfigDir, m.calicoCNIConfigName)
 	return nil
-}
-
-// Delete all pods which is not host networked on node.
-func (m *networkMigrator) deleteNonHostNetworkedPodsOnNode(node *v1.Node) error {
-	return deletePodsForNode(m.k8sClientset, node.Name, func(pod *v1.Pod) bool {
-		return pod.Spec.HostNetwork == false
-	})
 }
 
 // Remove Flannel network device/routes on node.
@@ -94,15 +88,20 @@ func (m *networkMigrator) removeFlannelNetworkAndInstallDummyCalicoCNI(node *v1.
 	cmd := fmt.Sprintf("ip link show flannel.%d || exit 0 && echo dummy-cni > /host/%s/%s ; ip link delete flannel.%d && exit 0 || exit 1",
 		m.config.FlannelVNI, m.config.CNIConfigDir, m.calicoCNIConfigName, m.config.FlannelVNI)
 	pod := k8spod("remove-flannel")
-	return pod.RunPodOnNodeTillComplete(m.k8sClientset, NAMESPACE_KUBE_SYSTEM, m.calicoImage, node.Name, cmd, m.config.CNIConfigDir, true)
+	podLog, err := pod.RunPodOnNodeTillComplete(m.k8sClientset, NAMESPACE_KUBE_SYSTEM, m.calicoImage, node.Name, cmd, m.config.CNIConfigDir, true,true)
+	if podLog != "" {
+		log.Infof("remove-flannel pod logs: %s.", podLog)
+	}
+	return err
 }
 
 // Drain node, remove Flannel and setup Calico network for a node.
 func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
-	log.Infof("Setting node label to disable Flannel daemonset pod on %d.", node.Name)
+	log.Infof("Setting node label to disable Flannel daemonset pod on %s.", node.Name)
 	// Set node label so no Flannel pod can be scheduled on this node.
 	// Flannel pod currently running on the node starts to be evicted as the side effect.
-	err := addNodeLabels(m.k8sClientset, node, nodeNetworkUnknown)
+	n := k8snode(node.Name)
+	err := n.addNodeLabels(m.k8sClientset, nodeNetworkUnknown)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node label to disable Flannel network for node %s.", node.Name)
 		return err
@@ -124,7 +123,9 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 
 	log.Infof("Deleting non-host-networked pods on %s.", node.Name)
 	// Delete all pods on the node which is not host networked.
-	err = m.deleteNonHostNetworkedPodsOnNode(node)
+	err = n.deletePodsForNode(m.k8sClientset, func(pod *v1.Pod) bool {
+		return pod.Spec.HostNetwork == false
+	})
 	if err != nil {
 		log.WithError(err).Errorf("failed to delete non-host-networked pods on node %s", node.Name)
 		return err
@@ -134,7 +135,7 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	// This will install Calico CNI configuration file.
 	// It will take the preference over Flannel CNI config or Canal CNI config.
 	log.Infof("Setting node lable to enable Calico daemonset pod on %s.", node.Name)
-	err = addNodeLabels(m.k8sClientset, node, nodeNetworkCalico)
+	err = n.addNodeLabels(m.k8sClientset, nodeNetworkCalico)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node label to enable Calico network for node %s.", node.Name)
 		return err

@@ -25,6 +25,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // daemonset holds a collection of helper functions for Kubernetes daemonset.
@@ -108,6 +110,7 @@ func (d daemonset) WaitForDaemonsetNotFound(k8sClientset *kubernetes.Clientset, 
 		if err != nil {
 			return true, err
 		}
+		// Daemoset still exists, retry.
 		return false, nil
 	})
 }
@@ -143,10 +146,12 @@ func (d daemonset) AddNodeSelector(k8sClientset *kubernetes.Clientset, namespace
 type k8spod string
 
 // Run a pod with a host path volume on specified node. Wait till it is completed.
-// Return error if for any reason pod not completed successfully.
-func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, namespace, imageName, nodeName, shellCmd, hostPath string, hostNetwork bool) error {
+// Return error with log if for any reason pod not completed successfully.
+func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, namespace, imageName, nodeName, shellCmd, hostPath string, privileged, hostNetwork bool) (string, error) {
 	podName := string(p)
+	containerName := podName
 	hostPathDirectory := v1.HostPathDirectory
+
 	podSpec := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: podName + "-",
@@ -157,7 +162,7 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
-					Name:    podName,
+					Name:    containerName,
 					Image:   imageName,
 					Command: []string{"/bin/sh"},
 					Args: []string{
@@ -170,11 +175,12 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 							MountPath: fmt.Sprintf("/host/%s", hostPath),
 						},
 					},
+					SecurityContext: &v1.SecurityContext{Privileged: &privileged},
 				},
 			},
-			HostNetwork:   hostNetwork,
-			NodeName:      nodeName,
-			RestartPolicy: v1.RestartPolicyNever,
+			HostNetwork:     hostNetwork,
+			NodeName:        nodeName,
+			RestartPolicy:   v1.RestartPolicyNever,
 			Volumes: []v1.Volume{
 				{
 					Name: "host-dir",
@@ -189,11 +195,36 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 		},
 	}
 
+	log := ""
 	pod, err := k8sClientset.CoreV1().Pods(namespace).Create(podSpec)
 	if err != nil {
-		return fmt.Errorf("pod %s failed to create on node %s", podName, nodeName)
+		return log, err
 	}
-	return waitForPodSuccessTimeout(k8sClientset, pod.Name, pod.Namespace, 1*time.Second, 2*time.Minute)
+
+	err = waitForPodSuccessTimeout(k8sClientset, pod.Name, pod.Namespace, 1*time.Second, 2*time.Minute)
+	if err != nil {
+		// Trying to get pod log on error.
+		log, _ = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
+	}
+
+	return log, err
+}
+
+// Get Pod logs
+func getPodContainerLog(k8sClientSet *kubernetes.Clientset, namespace, podName, containerName string) (string, error) {
+	podLog, err := k8sClientSet.CoreV1().RESTClient().Get().
+		Resource("pods").
+		Namespace(namespace).
+		Name(podName).SubResource("log").
+		Param("container", containerName).
+		Param("previous", "false").
+		Do().
+		Raw()
+	if err != nil {
+		log.Errorf("failed to get pod log error %+v", err)
+		return "", err
+	}
+	return string(podLog), err
 }
 
 // waitForPodSuccessTimeout returns nil if the pod reached state success, or an error if it reached failure or ran too long.
@@ -201,21 +232,32 @@ func waitForPodSuccessTimeout(k8sClientset *kubernetes.Clientset, podName, names
 	return wait.PollImmediate(interval, timeout, func() (bool, error) {
 		pod, err := k8sClientset.CoreV1().Pods(namespace).Get(podName, metav1.GetOptions{})
 		if err != nil {
+			// Cannot get pod yet, retry.
 			return false, err
 		}
-		switch pod.Status.Phase {
-		case v1.PodFailed:
-			return true, fmt.Errorf("pod %s failed with status: %+v", podName, pod.Status)
-		case v1.PodSucceeded:
+		if pod.Status.Phase == v1.PodSucceeded {
 			return true, nil
 		}
+		if pod.Status.Phase == v1.PodFailed {
+			return true, fmt.Errorf("pod %s completed with failed status: %+v", podName, pod.Status)
+		}
+		// None of above, retry.
 		return false, nil
 	})
 }
 
-// Add node labels to node.
+// k8snode holds a collection of helper functions for Kubernetes node.
+type k8snode string
+
+// Add node labels to node. Perform Get/Check/Update so that it always working on latest version.
 // If node labels has been set already, do nothing.
-func addNodeLabels(k8sClientset *kubernetes.Clientset, node *v1.Node, labels map[string]string) error {
+func (n k8snode) addNodeLabels(k8sClientset *kubernetes.Clientset, labels map[string]string) error {
+	nodeName := string(n)
+	node, err := k8sClientset.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	needUpdate := false
 	for k, v := range labels {
 		if currentVal, ok := node.Labels[k]; ok && currentVal == v {
@@ -235,19 +277,9 @@ func addNodeLabels(k8sClientset *kubernetes.Clientset, node *v1.Node, labels map
 	return nil
 }
 
-// Get value of a node label.
-// If node does not have that label, return empty string and error.
-func getNodeLabelValue(k8sClientset *kubernetes.Clientset, node *v1.Node, key string) (string, error) {
-	currentVal, ok := node.Labels[key]
-	if !ok {
-		return "", fmt.Errorf("node label (%s) does not exists", key)
-	}
-
-	return currentVal, nil
-}
-
 // Start deletion process for pods on a node which satisfy a filter.
-func deletePodsForNode(k8sClientset *kubernetes.Clientset, nodeName string, filter func(pod *v1.Pod) bool) error {
+func (n k8snode) deletePodsForNode(k8sClientset *kubernetes.Clientset, filter func(pod *v1.Pod) bool) error {
+	nodeName := string(n)
 	podList, err := k8sClientset.CoreV1().Pods(metav1.NamespaceAll).List(metav1.ListOptions{
 		FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName}).String()})
 	if err != nil {
@@ -264,4 +296,15 @@ func deletePodsForNode(k8sClientset *kubernetes.Clientset, nodeName string, filt
 	}
 
 	return nil
+}
+
+// Get value of a node label.
+// If node does not have that label, return empty string and error.
+func getNodeLabelValue(k8sClientset *kubernetes.Clientset, node *v1.Node, key string) (string, error) {
+	currentVal, ok := node.Labels[key]
+	if !ok {
+		return "", fmt.Errorf("node label (%s) does not exists", key)
+	}
+
+	return currentVal, nil
 }
