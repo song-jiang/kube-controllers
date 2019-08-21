@@ -17,18 +17,22 @@ package flannelmigration
 import (
 	"context"
 	"fmt"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes"
+	"time"
 
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	log "github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
-	CALICO_NODE_CONTAINER_NAME = "calico-node"
-	CALICO_CNI_CONTAINER_NAME  = "install-cni"
-	CALICO_CNI_CONFIG_ENV_NAME = "CNI_CONF_NAME"
+	calicoNodeContainerName = "calico-node"
+	calicoCniContainerName  = "install-cni"
+	calicoCniConfigEnvName  = "CNI_CONF_NAME"
+
+	// Sync period between kubelet and CNI config file change.
+	// see https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/dockershim/network/cni/cni.go#L48
+	defaultSyncConfigPeriod = time.Second * 5
 )
 
 // networkMigrator responsible for migrating Flannel vxlan data plane to Calico vxlan data plane.
@@ -58,14 +62,14 @@ func NewNetworkMigrator(ctx context.Context, k8sClientset *kubernetes.Clientset,
 func (m *networkMigrator) Initialise() error {
 	// Set calico image
 	d := daemonset(m.config.CalicoDaemonsetName)
-	image, err := d.GetContainerImage(m.k8sClientset, NAMESPACE_KUBE_SYSTEM, CALICO_NODE_CONTAINER_NAME)
+	image, err := d.GetContainerImage(m.k8sClientset, namespaceKubeSystem, calicoNodeContainerName)
 	if err != nil {
 		return err
 	}
 	m.calicoImage = image
 
 	// Set calico CNI config file name
-	cniConf, err := d.GetContainerEnv(m.k8sClientset, NAMESPACE_KUBE_SYSTEM, CALICO_CNI_CONTAINER_NAME, CALICO_CNI_CONFIG_ENV_NAME)
+	cniConf, err := d.GetContainerEnv(m.k8sClientset, namespaceKubeSystem, calicoCniContainerName, calicoCniConfigEnvName)
 	if err != nil {
 		return err
 	}
@@ -84,14 +88,21 @@ func (m *networkMigrator) removeFlannelNetworkAndInstallDummyCalicoCNI(node *v1.
 	// https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodename
 
 	// Deleting a tunnel device will remove routes, APR and FDB entries related with the device.
-	// It is possible tunnel device has been deleted already.
-	cmd := fmt.Sprintf("ip link show flannel.%d || exit 0 && echo dummy-cni > /host/%s/%s ; ip link delete flannel.%d && exit 0 || exit 1",
-		m.config.FlannelVNI, m.config.CNIConfigDir, m.calicoCNIConfigName, m.config.FlannelVNI)
+	// Deleting cni0 device to remove routes to local pods.
+	// It is possible tunnel device or cni0 has been deleted already.
+	dummyCNI := `{ "name": "dummy", "plugins": [{ "type": "flannel-migration-in-progress" }]}`
+
+	cmd := fmt.Sprintf("{ ip link show cni0; ip link show flannel.%d; } || exit 0 && { echo '%s' > /host/%s/%s ; ip link delete cni0 type bridge; ip link delete flannel.%d; } && exit 0 || exit 1",
+		m.config.FlannelVNI, dummyCNI, m.config.CNIConfigDir, m.calicoCNIConfigName, m.config.FlannelVNI)
 	pod := k8spod("remove-flannel")
-	podLog, err := pod.RunPodOnNodeTillComplete(m.k8sClientset, NAMESPACE_KUBE_SYSTEM, m.calicoImage, node.Name, cmd, m.config.CNIConfigDir, true,true)
+	podLog, err := pod.RunPodOnNodeTillComplete(m.k8sClientset, namespaceKubeSystem, m.calicoImage, node.Name, cmd, m.config.CNIConfigDir, true, true)
 	if podLog != "" {
 		log.Infof("remove-flannel pod logs: %s.", podLog)
 	}
+
+	// Wait twice as long as default sync period so kubelet has picked up dummy CNI config.
+	// TODO we probably need something better here.
+	time.Sleep(2 * defaultSyncConfigPeriod)
 	return err
 }
 
@@ -109,6 +120,11 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 
 	// Cordon and Drain node. Make sure no pod (except daemonset pod or pod with nodeName selector) can run on this node.
 	// TODO
+
+	// Wait for flannel pod to disappear before we proceed, otherwise it may reinstall Flannel network.
+	//n.waitPodsDisappearForNode(m.k8sClientset, 1*time.Second, 2*time.Minute, func(pod *v1.Pod) bool {
+	//	return true
+	//})
 
 	log.Infof("Removing flannel tunnel device/routes on %s.", node.Name)
 	// Remove Flannel network from node.
@@ -135,7 +151,7 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	// This will install Calico CNI configuration file.
 	// It will take the preference over Flannel CNI config or Canal CNI config.
 	log.Infof("Setting node lable to enable Calico daemonset pod on %s.", node.Name)
-	err = n.addNodeLabels(m.k8sClientset, nodeNetworkCalico)
+	// FIXME err = n.addNodeLabels(m.k8sClientset, nodeNetworkCalico)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node label to enable Calico network for node %s.", node.Name)
 		return err
@@ -155,10 +171,19 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 func (m *networkMigrator) MigrateNodes(nodes []*v1.Node) error {
 	log.Infof("Start network migration process for %d nodes.", len(nodes))
 	for _, node := range nodes {
-		err := m.setupCalicoNetworkForNode(node)
+		_, err := getNodeLabelValue(m.k8sClientset, node, "node-role.kubernetes.io/master")
+		if err == nil {
+			// TODO Skip master node for now.
+			log.Infof("Skip master node %s.", node.Name)
+			continue
+		}
+		err = m.setupCalicoNetworkForNode(node)
 		if err != nil {
 			return err
 		}
+
+		// TODO for debug purpose, migrate just one slave node.
+		break
 	}
 	log.Infof("%d nodes completed network migration process.", len(nodes))
 

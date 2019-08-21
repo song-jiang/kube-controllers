@@ -65,6 +65,9 @@ type Config struct {
 
 	// CNI config directory. The full path of the directory in which to search for CNI config files. Default: /etc/cni/net.d
 	CNIConfigDir string `default:"/etc/cni/net.d" split_words:"true"`
+
+	// Node name which migration controller is running. This ENV is passed via Kubernetes downwards API.
+	PodNodeName string `default:"" split_words:"true"`
 }
 
 // Parse parses envconfig and stores in Config struct.
@@ -96,6 +99,11 @@ func (c *Config) ValidateConfig() error {
 	// Check Flannel MTU.
 	if c.FlannelMTU == 0 {
 		return fmt.Errorf("Missing FlannelMTU config")
+	}
+
+	// Check pod node name
+	if c.PodNodeName == "" {
+		return fmt.Errorf("Missing PodNodeName config")
 	}
 
 	return nil

@@ -29,8 +29,8 @@ import (
 )
 
 const (
-	NAMESPACE_KUBE_SYSTEM       = "kube-system"
-	MIGRATION_NODE_SELECTOR_KEY = "projectcalico.org/node-network-during-migration"
+	namespaceKubeSystem      = "kube-system"
+	migrationNodeSelectorKey = "projectcalico.org/node-network-during-migration"
 )
 
 // Flannel migration controller consists of three major components.
@@ -41,12 +41,12 @@ const (
 var (
 	// nodeNetworkFlannel is a map value indicates a node is still part of Flannel vxlan network.
 	// This is used both as a nodeSelector for Flannel daemonset and a label for a node.
-	nodeNetworkFlannel = map[string]string{MIGRATION_NODE_SELECTOR_KEY: "flannel"}
+	nodeNetworkFlannel = map[string]string{migrationNodeSelectorKey: "flannel"}
 	// nodeNetworkCalico is a map value indicates a node is becoming part of Calico vxlan network.
 	// This is used both as a nodeSelector for Calico daemonset and a label for a node.
-	nodeNetworkCalico = map[string]string{MIGRATION_NODE_SELECTOR_KEY: "calico"}
+	nodeNetworkCalico = map[string]string{migrationNodeSelectorKey: "calico"}
 	// nodeNetworkUnknown is a map value indicates a node is running network migration.
-	nodeNetworkUnknown = map[string]string{MIGRATION_NODE_SELECTOR_KEY: "unknown"}
+	nodeNetworkUnknown = map[string]string{migrationNodeSelectorKey: "unknown"}
 )
 
 // flannelMigrationController implements the Controller interface.
@@ -120,7 +120,7 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	// First step is to add node selector "projectcalico.org/node-network-during-migration==flannel" to Flannel daemonset.
 	// This would prevent Flannel pod running on any new nodes or a node which has been migrated to Calico network.
 	d := daemonset(c.config.FlannelDaemonsetName)
-	err = d.AddNodeSelector(c.k8sClientset, NAMESPACE_KUBE_SYSTEM, nodeNetworkFlannel)
+	err = d.AddNodeSelector(c.k8sClientset, namespaceKubeSystem, nodeNetworkFlannel)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node selector to Flannel daemonset.")
 		return
@@ -176,7 +176,7 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 	}
 
 	// Defensively check node label again to make sure the node has not been processed by anyone.
-	_, err := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
+	_, err := getNodeLabelValue(c.k8sClientset, node, migrationNodeSelectorKey)
 	if err == nil {
 		// Node got label already. Skip it.
 		log.Infof("New node %s has been processed.", node.Name)
@@ -205,7 +205,7 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
 	// Check Flannel daemonset.
 	d := daemonset(c.config.FlannelDaemonsetName)
-	notFound, err := d.CheckNotExists(c.k8sClientset, NAMESPACE_KUBE_SYSTEM)
+	notFound, err := d.CheckNotExists(c.k8sClientset, namespaceKubeSystem)
 	if err != nil {
 		return false, err
 	}
@@ -253,18 +253,31 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 
 	// Work out list of nodes not running Calico. It could happen that all nodes are running Calico and it returns an empty list.
 	items := c.indexer.List()
+	var controllerNode *v1.Node
 	for _, obj := range items {
 		node := obj.(*v1.Node)
 
-		val, _ := getNodeLabelValue(c.k8sClientset, node, MIGRATION_NODE_SELECTOR_KEY)
+		val, _ := getNodeLabelValue(c.k8sClientset, node, migrationNodeSelectorKey)
 		if val != "calico" {
 			n := k8snode(node.Name)
 			if err := n.addNodeLabels(c.k8sClientset, nodeNetworkFlannel); err != nil {
 				log.WithError(err).Errorf("Error adding node label to node %s.", node.Name)
 				return []*v1.Node{}, err
 			}
-			nodes = append(nodes, node)
+			// check if migration controller is running on this node.
+			// If it is, make sure it is the last node we try to process.
+			if node.Name == c.config.PodNodeName {
+				log.Infof("Migration controller is running on node %s.", node.Name)
+				controllerNode = node
+			} else {
+				nodes = append(nodes, node)
+			}
 		}
+	}
+
+	if controllerNode != nil {
+		log.Infof("Controller node %s is last node to be migrated.", controllerNode.Name)
+		nodes = append(nodes, controllerNode)
 	}
 
 	// At this point, any node would have a "projectcalico.org/node-network-during-migration" lable.

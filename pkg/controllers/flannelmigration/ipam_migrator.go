@@ -34,11 +34,11 @@ import (
 )
 
 const (
-	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA = "backend-data"
-	FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE = "backend-type"
-	DEFAULT_IPV4_POOL_NAME                   = "default-ipv4-ippool"
-	DEFAULT_FELIX_CONFIGURATION_NAME         = "default"
-	DEFAULT_IPPOOL_SIZE                      = 26
+	flannelNodeAnnotationKeyBackendData = "backend-data"
+	flannelNodeAnnotationKeyBackendType = "backend-type"
+	defaultIpv4PoolName                 = "default-ipv4-ippool"
+	defaultFelixConfigurationName       = "default"
+	defaultIppoolSize                   = 26
 )
 
 // IPAMMigrator responsible for migrating host-local IPAM to Calico IPAM.
@@ -77,8 +77,8 @@ func (m ipamMigrator) InitialiseIPPoolAndFelixConfig() error {
 	}
 
 	// Based on FlannelSubnetLen, work out the size of ippool.
-	blockSize := DEFAULT_IPPOOL_SIZE
-	if m.config.FlannelSubnetLen > DEFAULT_IPPOOL_SIZE {
+	blockSize := defaultIppoolSize
+	if m.config.FlannelSubnetLen > defaultIppoolSize {
 		// Flannel subnet is smaller than one Calico IPAM block with default size of /26.
 		blockSize = m.config.FlannelSubnetLen
 	}
@@ -120,7 +120,7 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 	// Get Flannel vxlan setup from node annotations. An example is
 	// flannel.alpha.coreos.com/backend-data: '{"VtepMAC":"56:1d:8d:30:79:97"}'
 	// flannel.alpha.coreos.com/backend-type: vxlan
-	backendType, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+FLANNEL_NODE_ANNOTATION_KEY_BACKEND_TYPE]
+	backendType, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyBackendType]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend type", node.Name)
 	}
@@ -128,7 +128,7 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 		return fmt.Errorf("node %s got wrong Flannel backend type %s", node.Name, backendType)
 	}
 
-	backendData, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+FLANNEL_NODE_ANNOTATION_KEY_BACKEND_DATA]
+	backendData, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyBackendData]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend data", node.Name)
 	}
@@ -232,6 +232,9 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 		return nil
 	}
 
+	log.Infof("Calico Node got BGP %+v.", node.Spec.BGP)
+
+	//node.Spec.BGP = &api.NodeBGPSpec{} // make sure startup.go autodetects node ip.
 	node.Spec.IPv4VXLANTunnelAddr = ip.String()
 	node.Spec.VXLANTunnelMACAddr = mac
 	_, err = c.Nodes().Update(ctx, node, options.SetOptions{})
@@ -248,7 +251,7 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr *cnet.IPNet, blockSize int, isNATOutgoingEnabled bool) error {
 	pool := &api.IPPool{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: DEFAULT_IPV4_POOL_NAME,
+			Name: defaultIpv4PoolName,
 		},
 		Spec: api.IPPoolSpec{
 			CIDR:        cidr.String(),
@@ -268,7 +271,7 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 			log.WithError(err).Errorf("Failed to create default IPv4 pool (%s)", cidr.String())
 			return err
 		} else {
-			defaultPool, err := client.IPPools().Get(ctx, DEFAULT_IPV4_POOL_NAME, options.GetOptions{})
+			defaultPool, err := client.IPPools().Get(ctx, defaultIpv4PoolName, options.GetOptions{})
 			if err != nil {
 				log.WithError(err).Errorf("Failed to get existing default IPv4 IP pool")
 				return err
@@ -302,7 +305,7 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 // Return error if default FelixConfiguration not exists or vxlan is not enabled.
 func updateDefaultFelixConfigurtion(ctx context.Context, client client.Interface, vni, port, mtu int) error {
 	// Get default Felix configuration. Return error if not exists.
-	defaultConfig, err := client.FelixConfigurations().Get(ctx, DEFAULT_FELIX_CONFIGURATION_NAME, options.GetOptions{})
+	defaultConfig, err := client.FelixConfigurations().Get(ctx, defaultFelixConfigurationName, options.GetOptions{})
 	if err != nil {
 		log.WithError(err).Errorf("Error getting default FelixConfiguration resource")
 		return err
@@ -341,6 +344,7 @@ func updateDefaultFelixConfigurtion(ctx context.Context, client client.Interface
 	defaultConfig.Spec.VXLANVNI = &vni
 	defaultConfig.Spec.VXLANPort = &port
 	defaultConfig.Spec.VXLANMTU = &mtu
+	defaultConfig.Spec.InterfaceExclude = "kube-ipvs0,cni0" // prevent autodetecting cni0 interface.
 	_, err = client.FelixConfigurations().Update(ctx, defaultConfig, options.SetOptions{})
 	if err != nil {
 		// Migration controller should be the single source of updating FelixConfiguration.

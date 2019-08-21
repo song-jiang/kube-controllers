@@ -152,6 +152,7 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 	containerName := podName
 	hostPathDirectory := v1.HostPathDirectory
 
+	log.Infof("Create pod on node %s to run [ %s ].", nodeName, shellCmd)
 	podSpec := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: podName + "-",
@@ -195,19 +196,19 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 		},
 	}
 
-	log := ""
+	logs := ""
 	pod, err := k8sClientset.CoreV1().Pods(namespace).Create(podSpec)
 	if err != nil {
-		return log, err
+		return logs, err
 	}
 
 	err = waitForPodSuccessTimeout(k8sClientset, pod.Name, pod.Namespace, 1*time.Second, 2*time.Minute)
 	if err != nil {
 		// Trying to get pod log on error.
-		log, _ = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
+		logs, _ = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
 	}
 
-	return log, err
+	return logs, err
 }
 
 // Get Pod logs
@@ -221,7 +222,7 @@ func getPodContainerLog(k8sClientSet *kubernetes.Clientset, namespace, podName, 
 		Do().
 		Raw()
 	if err != nil {
-		log.Errorf("failed to get pod log error %+v", err)
+		log.Errorf("failed to get pod log with error %+v", err)
 		return "", err
 	}
 	return string(podLog), err
@@ -294,6 +295,30 @@ func (n k8snode) deletePodsForNode(k8sClientset *kubernetes.Clientset, filter fu
 			}
 		}
 	}
+
+	return nil
+}
+
+// Start deletion process for pods on a node which satisfy a filter.
+func (n k8snode) waitPodsDisappearForNode(k8sClientset *kubernetes.Clientset, interval, timeout time.Duration, filter func(pod *v1.Pod) bool) error {
+	return wait.PollImmediate(interval, timeout, func() (bool, error) {
+		nodeName := string(n)
+		podList, err := k8sClientset.CoreV1().Pods(metav1.NamespaceAll).List(metav1.ListOptions{
+			FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName}).String()})
+		if err != nil {
+			// Something wrong, stop waiting
+			return true, err
+		}
+
+		for _, pod := range podList.Items {
+			if filter(&pod) {
+				// Pod is there, retry.
+				return false, nil
+			}
+		}
+		// Pod gone, stop waiting
+		return true, nil
+	})
 
 	return nil
 }
