@@ -36,6 +36,7 @@ import (
 const (
 	flannelNodeAnnotationKeyBackendData = "backend-data"
 	flannelNodeAnnotationKeyBackendType = "backend-type"
+	flannelNodeAnnotationKeyPublicIP    = "public-ip"
 	defaultIpv4PoolName                 = "default-ipv4-ippool"
 	defaultFelixConfigurationName       = "default"
 	defaultIppoolSize                   = 26
@@ -120,6 +121,7 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 	// Get Flannel vxlan setup from node annotations. An example is
 	// flannel.alpha.coreos.com/backend-data: '{"VtepMAC":"56:1d:8d:30:79:97"}'
 	// flannel.alpha.coreos.com/backend-type: vxlan
+	// flannel.alpha.coreos.com/public-ip: 172.16.101.96
 	backendType, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyBackendType]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend type", node.Name)
@@ -131,6 +133,14 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 	backendData, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyBackendData]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend data", node.Name)
+	}
+
+	publicIP, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyPublicIP]
+	if !ok {
+		return fmt.Errorf("node %s missing annotation for Flannel public ip", node.Name)
+	}
+	if _, _, err := cnet.ParseCIDROrIP(publicIP); err != nil {
+		return fmt.Errorf("node %s got wrong Flannel public ip '%s'", node.Name, publicIP)
 	}
 
 	type flannelVtepMac struct {
@@ -153,8 +163,8 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 	}
 	log.Infof("%d IPAM blocks claimed for node %s.", len(claimed), node.Name)
 
-	// Update Calico node with Flannel vtep IP/Mac.
-	err = setupCalicoNodeVxlan(m.ctx, m.calicoClient, node.Name, *vtepIP, vtepMac)
+	// Update Calico node with Flannel vtep IP/Mac/publicIP.
+	err = setupCalicoNodeVxlan(m.ctx, m.calicoClient, node.Name, *vtepIP, vtepMac, publicIP)
 	if err != nil {
 		return err
 	}
@@ -178,13 +188,13 @@ func (m ipamMigrator) MigrateNodes(nodes []*v1.Node) error {
 }
 
 // setupCalicoNodeVxlan assigns specified IP/Mac address as vtep IP/Mac address for Calico node.
-func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName string, ip cnet.IP, mac string) error {
-	log.Infof("Updating Calico Node %s with vtep IP %s, Mac %s.", nodeName, ip.String(), mac)
+func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName string, vtepIP cnet.IP, mac, publicIP string) error {
+	log.Infof("Updating Calico Node %s with vtep IP %s, Mac %s.", nodeName, vtepIP.String(), mac)
 
 	// Assign vtep IP.
 	// Check current status of vtep IP. It could be assigned already.
 	assign := true
-	attr, err := c.IPAM().GetAssignmentAttributes(ctx, ip)
+	attr, err := c.IPAM().GetAssignmentAttributes(ctx, vtepIP)
 	if err == nil {
 		if attr[ipam.AttributeType] == ipam.AttributeTypeVXLAN && attr[ipam.AttributeNode] == nodeName {
 			// The tunnel address is still valid, do nothing.
@@ -192,15 +202,15 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 			assign = false
 		} else {
 			// The tunnel address has been allocated to something else, return error.
-			return fmt.Errorf("vtep IP %s has been occupied", ip.String())
+			return fmt.Errorf("vtep IP %s has been occupied", vtepIP.String())
 		}
 	} else if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
 		// The tunnel address is not assigned, assign it.
-		log.WithField("vtepIP", ip.String()).Info("assign a new vtep IP")
+		log.WithField("vtepIP", vtepIP.String()).Info("assign a new vtep IP")
 	} else {
 		// Failed to get assignment attributes, datastore connection issues possible.
-		log.WithError(err).Errorf("Failed to get assignment attributes for vtep IP '%s'", ip.String())
-		return fmt.Errorf("Failed to get vtep IP %s attribute", ip.String())
+		log.WithError(err).Errorf("Failed to get assignment attributes for vtep IP '%s'", vtepIP.String())
+		return fmt.Errorf("Failed to get vtep IP %s attribute", vtepIP.String())
 	}
 
 	if assign {
@@ -210,39 +220,41 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 		handle := fmt.Sprintf("vxlan-tunnel-addr-%s", nodeName)
 
 		err := c.IPAM().AssignIP(ctx, ipam.AssignIPArgs{
-			IP:       ip,
+			IP:       vtepIP,
 			Hostname: nodeName,
 			HandleID: &handle,
 			Attrs:    attrs,
 		})
 		if err != nil {
-			return fmt.Errorf("Failed to assign vtep IP %s", ip.String())
+			return fmt.Errorf("Failed to assign vtep IP %s", vtepIP.String())
 		}
 		log.Infof("Calico Node %s vtep IP assigned.", nodeName)
 	}
 
-	// Update Calico node with vtep IP/Mac
+	// Update Calico node with vtep IP/Mac/PublicIP
 	node, err := c.Nodes().Get(ctx, nodeName, options.GetOptions{})
 	if err != nil {
 		return err
 	}
 
 	// If node has correct vxlan setup, do nothing.
-	if node.Spec.IPv4VXLANTunnelAddr == ip.String() && node.Spec.VXLANTunnelMACAddr == mac {
+	if node.Spec.IPv4VXLANTunnelAddr == vtepIP.String() && node.Spec.VXLANTunnelMACAddr == mac &&
+		(node.Spec.BGP != nil && node.Spec.BGP.IPv4Address == publicIP) {
 		return nil
 	}
 
-	log.Infof("Calico Node got BGP %+v.", node.Spec.BGP)
+	log.Infof("Calico Node current value: %+v.", node)
 
-	//node.Spec.BGP = &api.NodeBGPSpec{} // make sure startup.go autodetects node ip.
-	node.Spec.IPv4VXLANTunnelAddr = ip.String()
+	node.Spec.BGP = &api.NodeBGPSpec{} // set public ip for node
+	node.Spec.BGP.IPv4Address = publicIP
+	node.Spec.IPv4VXLANTunnelAddr = vtepIP.String()
 	node.Spec.VXLANTunnelMACAddr = mac
 	_, err = c.Nodes().Update(ctx, node, options.SetOptions{})
 	if err != nil {
 		return err
 	}
 
-	log.Infof("Calico Node %s vtep IP/Mac updated.", nodeName)
+	log.Infof("Calico Node %s vtep IP/Mac/PublicIP updated.", nodeName)
 	return nil
 }
 

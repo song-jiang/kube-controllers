@@ -151,7 +151,7 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	// This will install Calico CNI configuration file.
 	// It will take the preference over Flannel CNI config or Canal CNI config.
 	log.Infof("Setting node lable to enable Calico daemonset pod on %s.", node.Name)
-	// FIXME err = n.addNodeLabels(m.k8sClientset, nodeNetworkCalico)
+	err = n.addNodeLabels(m.k8sClientset, nodeNetworkCalico)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node label to enable Calico network for node %s.", node.Name)
 		return err
