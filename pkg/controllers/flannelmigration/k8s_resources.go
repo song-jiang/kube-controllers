@@ -116,6 +116,31 @@ func (d daemonset) WaitForDaemonsetNotFound(k8sClientset *kubernetes.Clientset, 
 	})
 }
 
+// Remove node selectors from daemonset.
+func (d daemonset) RemoveNodeSelector(k8sClientset *kubernetes.Clientset, namespace string, selector map[string]string) error {
+	ds, err := k8sClientset.AppsV1().DaemonSets(namespace).Get(string(d), metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	needUpdate := false
+	for k, v := range selector {
+		if currentVal, ok := ds.Spec.Template.Spec.NodeSelector[k]; ok && currentVal == v {
+			delete(ds.Spec.Template.Spec.NodeSelector, k)
+			needUpdate = true
+		}
+	}
+
+	if needUpdate {
+		_, err = k8sClientset.AppsV1().DaemonSets(namespace).Update(ds)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Add node selectors to daemonset.
 // If node selectors has been set already, do nothing.
 func (d daemonset) AddNodeSelector(k8sClientset *kubernetes.Clientset, namespace string, selector map[string]string) error {
@@ -354,6 +379,18 @@ func (n k8snode) Uncordon() error {
 	}
 
 	log.Infof("Uncordon node %s completed successfully.", nodeName)
+	return nil
+}
+
+func removeLabelForAllNodes(key string) error {
+	log.Infof("Start remove node label %s", key)
+	out, err := exec.Command("/usr/bin/kubectl", "label","node", key+"-", "--all").CombinedOutput()
+	if err != nil {
+		log.Errorf("Remove label node %s. \n ---Remove Node Label Logs--- \n %s \n ------", key, string(out))
+		return err
+	}
+
+	log.Infof("Remove node label %s completed successfully.", key)
 	return nil
 }
 

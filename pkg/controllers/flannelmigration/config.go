@@ -16,10 +16,19 @@ package flannelmigration
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/kelseyhightower/envconfig"
 
+	"github.com/joho/godotenv"
+
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
+)
+
+const (
+	flannelEnvFile     = "/host/run/flannel/subnet.env"
+	canalDaemonsetName = "canal"
 )
 
 //Flannel migration controller configurations
@@ -30,8 +39,8 @@ type Config struct {
 	FlannelNetwork string `default:"" split_words:"true"`
 
 	// Name of Flannel daemonset in kube-system namespace.
-	// This is a mandatory config item.
-	FlannelDaemonsetName string `default:"" split_words:"true"`
+	// This could be Canal daemonset. Default is kube-flannel-ds-amd64
+	FlannelDaemonsetName string `default:"kube-flannel-ds-amd64" split_words:"true"`
 
 	// FlannelMTU is the mtu used by flannel vxlan tunnel interface.
 	// For example, if flannel VNI is 1, this number can be obtained by running "ip -d link show flannel.1" on one of the host.
@@ -77,6 +86,31 @@ func (c *Config) Parse() error {
 		return err
 	}
 
+	// Work out config items based on env file.
+	if _, err := os.Stat(flannelEnvFile); os.IsNotExist(err) {
+		return fmt.Errorf("Flannel env file %s not exists.", flannelEnvFile)
+	}
+
+	if c.FlannelNetwork, err = readFlannelEnvFile("FLANNEL_NETWORK"); err != nil {
+		return err
+	}
+
+	var mtu string
+	if mtu, err = readFlannelEnvFile("FLANNEL_MTU"); err != nil {
+		return err
+	}
+	if c.FlannelMTU, err = strconv.Atoi(mtu); err != nil {
+		return err
+	}
+
+	var masq string
+	if masq, err = readFlannelEnvFile("FLANNEL_IPMASQ"); err != nil {
+		return err
+	}
+	if c.FlannelIPMasq, err = strconv.ParseBool(masq); err != nil {
+		return err
+	}
+
 	return c.ValidateConfig()
 }
 
@@ -107,4 +141,17 @@ func (c *Config) ValidateConfig() error {
 	}
 
 	return nil
+}
+
+func readFlannelEnvFile(key string) (string, error) {
+	items, err := godotenv.Read(flannelEnvFile)
+	if err != nil {
+		return "", fmt.Errorf("Failed to read Flannel env file")
+	}
+
+	if val, ok := items[key]; ok {
+		return val, nil
+	}
+
+	return "", fmt.Errorf("key %s not found in Flannel env file", key)
 }

@@ -164,7 +164,7 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	}
 
 	<-stopCh
-	log.Info("Stopping Migration controller")
+	log.Info("All done. Stopping Migration controller")
 }
 
 // For new node, setup Calico IPAM based on node pod CIDR and update node selector.
@@ -323,12 +323,34 @@ func (c *flannelMigrationController) runNetworkMigrationForNodes() error {
 func (c *flannelMigrationController) completeMigration() error {
 	// Delete Flannel daemonset.
 	d := daemonset(c.config.FlannelDaemonsetName)
+	log.Infof("Start deleting %s daemonset.", c.config.FlannelDaemonsetName)
 	err := d.DeleteForeground(c.k8sClientset, namespaceKubeSystem)
 	if err != nil {
 		log.WithError(err).Errorf("Failed to delete Flannel daemonset.")
 		return err
 	}
 
-	// TODO Remove node labels
+	log.Infof("Waiting for %s daemonset to disappear.", c.config.FlannelDaemonsetName)
+	err = d.WaitForDaemonsetNotFound(c.k8sClientset, namespaceKubeSystem, 1*time.Second, 5*time.Minute)
+	if err != nil {
+		log.WithError(err).Errorf("Timeout deleting Flannel daemonset.")
+		return err
+	}
+
+	// Remove nodeSelector for Calico Daemonet.
+	d = daemonset(c.config.CalicoDaemonsetName)
+	log.Infof("Remove node selector for daemonset %s.", c.config.CalicoDaemonsetName)
+	err = d.RemoveNodeSelector(c.k8sClientset, namespaceKubeSystem, nodeNetworkCalico)
+	if err != nil {
+		log.WithError(err).Errorf("Failed to remove node selector for daemonset %s.", c.config.CalicoDaemonsetName)
+		return err
+	}
+
+	// Remove node labels
+	err = removeLabelForAllNodes(migrationNodeSelectorKey)
+	if err != nil {
+		log.WithError(err).Errorf("Failed to remove node label %s.", migrationNodeSelectorKey)
+		return err
+	}
 	return nil
 }
