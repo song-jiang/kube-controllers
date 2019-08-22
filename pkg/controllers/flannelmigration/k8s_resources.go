@@ -16,6 +16,7 @@ package flannelmigration
 
 import (
 	"fmt"
+	"os/exec"
 	"time"
 
 	"k8s.io/apimachinery/pkg/fields"
@@ -179,9 +180,9 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 					SecurityContext: &v1.SecurityContext{Privileged: &privileged},
 				},
 			},
-			HostNetwork:     hostNetwork,
-			NodeName:        nodeName,
-			RestartPolicy:   v1.RestartPolicyNever,
+			HostNetwork:   hostNetwork,
+			NodeName:      nodeName,
+			RestartPolicy: v1.RestartPolicyNever,
 			Volumes: []v1.Volume{
 				{
 					Name: "host-dir",
@@ -202,7 +203,7 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 		return logs, err
 	}
 
-	err = waitForPodSuccessTimeout(k8sClientset, pod.Name, pod.Namespace, 1*time.Second, 2*time.Minute)
+	err = waitForPodSuccessTimeout(k8sClientset, pod.Name, pod.Namespace, 1*time.Second, 5*time.Minute)
 	if err != nil {
 		// Trying to get pod log on error.
 		logs, _ = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
@@ -326,6 +327,33 @@ func (n k8snode) waitPodsDisappearForNode(k8sClientset *kubernetes.Clientset, in
 		return true, nil
 	})
 
+	return nil
+}
+
+func (n k8snode) Drain() error {
+	nodeName := string(n)
+	log.Infof("Start drain node %s", nodeName)
+	out, err := exec.Command("/usr/bin/kubectl", "drain",
+		"--ignore-daemonsets", "--delete-local-data", "--force", nodeName).CombinedOutput()
+	if err != nil {
+		log.Errorf("Drain node %s. \n ---Drain Node--- \n %s \n ------", nodeName, string(out))
+		return err
+	}
+
+	log.Infof("Drain node %s completed successfully. \n ---Drain Node Logs--- \n %s \n ------", nodeName, string(out))
+	return nil
+}
+
+func (n k8snode) Uncordon() error {
+	nodeName := string(n)
+	log.Infof("Start uncordon node %s", nodeName)
+	out, err := exec.Command("/usr/bin/kubectl", "uncordon", nodeName).CombinedOutput()
+	if err != nil {
+		log.Errorf("Uncordon node %s. \n ---Uncordon Node Logs--- \n %s \n ------", nodeName, string(out))
+		return err
+	}
+
+	log.Infof("Uncordon node %s completed successfully.", nodeName)
 	return nil
 }
 

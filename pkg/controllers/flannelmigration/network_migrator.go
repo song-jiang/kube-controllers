@@ -120,7 +120,11 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	}
 
 	// Cordon and Drain node. Make sure no pod (except daemonset pod or pod with nodeName selector) can run on this node.
-	// TODO
+	err = n.Drain()
+	if err != nil {
+		log.WithError(err).Errorf("failed to drain node %s", node.Name)
+		return err
+	}
 
 	// Wait for flannel pod to disappear before we proceed, otherwise it may reinstall Flannel network.
 	//n.waitPodsDisappearForNode(m.k8sClientset, 1*time.Second, 2*time.Minute, func(pod *v1.Pod) bool {
@@ -162,7 +166,11 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	// TODO do we need to wait for calico node pod ready?
 
 	// Uncordon node.
-	//TODO
+	err = n.Uncordon()
+	if err != nil {
+		log.WithError(err).Errorf("failed to uncordon node %s", node.Name)
+		return err
+	}
 
 	log.Infof("Calico networking is running on %s.", node.Name)
 	return nil

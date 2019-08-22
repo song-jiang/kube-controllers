@@ -356,16 +356,8 @@ func updateDefaultFelixConfigurtion(ctx context.Context, client client.Interface
 	defaultConfig.Spec.VXLANVNI = &vni
 	defaultConfig.Spec.VXLANPort = &port
 	defaultConfig.Spec.VXLANMTU = &mtu
-	defaultConfig.Spec.InterfaceExclude = "kube-ipvs0,cni0" // prevent autodetecting cni0 interface.
 	_, err = client.FelixConfigurations().Update(ctx, defaultConfig, options.SetOptions{})
 	if err != nil {
-		// Migration controller should be the single source of updating FelixConfiguration.
-		// If an update conflict occur, it means there is a race between two migration controllers or
-		// between migration controller and a calico node. In both cases, something is wrong.
-		if _, ok := err.(cerrors.ErrorResourceUpdateConflict); ok {
-			log.Errorf("default FelixConfiguration update conflict - something wrong.")
-			return err
-		}
 		log.WithError(err).Errorf("Failed to update default FelixConfiguration.")
 		return err
 	}

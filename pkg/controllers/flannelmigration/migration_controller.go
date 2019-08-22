@@ -291,8 +291,8 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 	}
 
 	if masterNode != nil {
-		log.Infof("Master node %s is last node to be migrated.", controllerNode.Name)
-		nodes = append(nodes, controllerNode)
+		log.Infof("Master node %s is last node to be migrated.", masterNode.Name)
+		nodes = append(nodes, masterNode)
 	}
 
 	if controllerNode != nil {
@@ -319,7 +319,16 @@ func (c *flannelMigrationController) runNetworkMigrationForNodes() error {
 	return c.networkMigrator.MigrateNodes(c.flannelNodes)
 }
 
-// ToDO.
+// Complete migration process.
 func (c *flannelMigrationController) completeMigration() error {
+	// Delete Flannel daemonset.
+	d := daemonset(c.config.FlannelDaemonsetName)
+	err := d.DeleteForeground(c.k8sClientset, namespaceKubeSystem)
+	if err != nil {
+		log.WithError(err).Errorf("Failed to delete Flannel daemonset.")
+		return err
+	}
+
+	// TODO Remove node labels
 	return nil
 }
