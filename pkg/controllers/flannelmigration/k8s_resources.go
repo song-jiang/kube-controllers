@@ -208,7 +208,13 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 		logs, _ = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
 	}
 
-	return logs, err
+	// Delete pod if everything is fine.
+	err = k8sClientset.CoreV1().Pods(namespace).Delete(pod.Name, &metav1.DeleteOptions{})
+	if err != nil {
+		return logs, err
+	}
+
+	return logs, nil
 }
 
 // Get Pod logs

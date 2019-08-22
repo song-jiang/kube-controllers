@@ -45,8 +45,8 @@ var (
 	// nodeNetworkCalico is a map value indicates a node is becoming part of Calico vxlan network.
 	// This is used both as a nodeSelector for Calico daemonset and a label for a node.
 	nodeNetworkCalico = map[string]string{migrationNodeSelectorKey: "calico"}
-	// nodeNetworkUnknown is a map value indicates a node is running network migration.
-	nodeNetworkUnknown = map[string]string{migrationNodeSelectorKey: "unknown"}
+	// nodeNetworkNone is a map value indicates a node is running network migration.
+	nodeNetworkNone = map[string]string{migrationNodeSelectorKey: "none"}
 )
 
 // flannelMigrationController implements the Controller interface.
@@ -117,14 +117,6 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	}
 
 	// Start migration process.
-	// First step is to add node selector "projectcalico.org/node-network-during-migration==flannel" to Flannel daemonset.
-	// This would prevent Flannel pod running on any new nodes or a node which has been migrated to Calico network.
-	d := daemonset(c.config.FlannelDaemonsetName)
-	err = d.AddNodeSelector(c.k8sClientset, namespaceKubeSystem, nodeNetworkFlannel)
-	if err != nil {
-		log.WithError(err).Errorf("Error adding node selector to Flannel daemonset.")
-		return
-	}
 
 	// Initialise Calico IPAM before we handle any nodes.
 	err = c.ipamMigrator.InitialiseIPPoolAndFelixConfig()
@@ -145,6 +137,15 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	c.flannelNodes, err = c.runIpamMigrationForNodes()
 	if err != nil {
 		log.WithError(err).Errorf("Error running ipam migration.")
+		return
+	}
+
+	// Add node selector "projectcalico.org/node-network-during-migration==flannel" to Flannel daemonset.
+	// This would prevent Flannel pod running on any new nodes or a node which has been migrated to Calico network.
+	d := daemonset(c.config.FlannelDaemonsetName)
+	err = d.AddNodeSelector(c.k8sClientset, namespaceKubeSystem, nodeNetworkFlannel)
+	if err != nil {
+		log.WithError(err).Errorf("Error adding node selector to Flannel daemonset.")
 		return
 	}
 
@@ -254,6 +255,7 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 	// Work out list of nodes not running Calico. It could happen that all nodes are running Calico and it returns an empty list.
 	items := c.indexer.List()
 	var controllerNode *v1.Node
+	var masterNode *v1.Node
 	for _, obj := range items {
 		node := obj.(*v1.Node)
 
@@ -264,20 +266,40 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 				log.WithError(err).Errorf("Error adding node label to node %s.", node.Name)
 				return []*v1.Node{}, err
 			}
+
+			addToList := true
 			// check if migration controller is running on this node.
 			// If it is, make sure it is the last node we try to process.
 			if node.Name == c.config.PodNodeName {
 				log.Infof("Migration controller is running on node %s.", node.Name)
 				controllerNode = node
-			} else {
+				addToList = false
+			}
+			// check if this node is master node.
+			// If it is, make sure it is the second last node we try to process.
+			_, err := getNodeLabelValue(c.k8sClientset, node, "node-role.kubernetes.io/master")
+			if err == nil {
+				log.Infof("Master node is %s.", node.Name)
+				masterNode = node
+				addToList = false
+			}
+
+			if addToList {
 				nodes = append(nodes, node)
 			}
 		}
 	}
 
+	if masterNode != nil {
+		log.Infof("Master node %s is last node to be migrated.", controllerNode.Name)
+		nodes = append(nodes, controllerNode)
+	}
+
 	if controllerNode != nil {
 		log.Infof("Controller node %s is last node to be migrated.", controllerNode.Name)
-		nodes = append(nodes, controllerNode)
+		if controllerNode != masterNode {
+			nodes = append(nodes, controllerNode)
+		}
 	}
 
 	// At this point, any node would have a "projectcalico.org/node-network-during-migration" lable.

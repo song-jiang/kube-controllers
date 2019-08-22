@@ -122,7 +122,7 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 	// flannel.alpha.coreos.com/backend-data: '{"VtepMAC":"56:1d:8d:30:79:97"}'
 	// flannel.alpha.coreos.com/backend-type: vxlan
 	// flannel.alpha.coreos.com/public-ip: 172.16.101.96
-	backendType, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyBackendType]
+	backendType, ok := node.Annotations[m.config.FlannelAnnotationPrefix+"/"+flannelNodeAnnotationKeyBackendType]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend type", node.Name)
 	}
@@ -130,12 +130,12 @@ func (m ipamMigrator) SetupCalicoIPAMForNode(node *v1.Node) error {
 		return fmt.Errorf("node %s got wrong Flannel backend type %s", node.Name, backendType)
 	}
 
-	backendData, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyBackendData]
+	backendData, ok := node.Annotations[m.config.FlannelAnnotationPrefix+"/"+flannelNodeAnnotationKeyBackendData]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel backend data", node.Name)
 	}
 
-	publicIP, ok := node.Annotations[m.config.FlannelAnnotationPreifx+"/"+flannelNodeAnnotationKeyPublicIP]
+	publicIP, ok := node.Annotations[m.config.FlannelAnnotationPrefix+"/"+flannelNodeAnnotationKeyPublicIP]
 	if !ok {
 		return fmt.Errorf("node %s missing annotation for Flannel public ip", node.Name)
 	}
@@ -192,7 +192,7 @@ func setupCalicoNodeVxlan(ctx context.Context, c client.Interface, nodeName stri
 	log.Infof("Updating Calico Node %s with vtep IP %s, Mac %s.", nodeName, vtepIP.String(), mac)
 
 	// Assign vtep IP.
-	// Check current status of vtep IP. It could be assigned already.
+	// Check current status of vtep IP. It could be assigned already if migration controller restarts.
 	assign := true
 	attr, err := c.IPAM().GetAssignmentAttributes(ctx, vtepIP)
 	if err == nil {
@@ -323,7 +323,7 @@ func updateDefaultFelixConfigurtion(ctx context.Context, client client.Interface
 		return err
 	}
 
-	// Check if vxlan is enabled. Return error is not.
+	// Check if vxlan is enabled. Return error if not.
 	vxlanEnabled := false
 	if defaultConfig.Spec.VXLANEnabled != nil {
 		vxlanEnabled = *defaultConfig.Spec.VXLANEnabled

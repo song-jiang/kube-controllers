@@ -52,7 +52,7 @@ type Config struct {
 	FlannelSubnetLen int `default:"24" split_words:"true"`
 
 	// FlannelAnnotationPrefix should has same value as Flannel "kube-annotation-prefix" commandline option.
-	FlannelAnnotationPreifx string `default:"flannel.alpha.coreos.com" split_words:"true"`
+	FlannelAnnotationPrefix string `default:"flannel.alpha.coreos.com" split_words:"true"`
 
 	// FlannelVNI is the VNI id used by Flannel vxlan network.
 	FlannelVNI int `default:"1" split_words:"true"`
