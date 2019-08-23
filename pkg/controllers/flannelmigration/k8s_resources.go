@@ -232,11 +232,16 @@ func (p k8spod) RunPodOnNodeTillComplete(k8sClientset *kubernetes.Clientset, nam
 
 	err = waitForPodSuccessTimeout(k8sClientset, pod.Name, pod.Namespace, 1*time.Second, 5*time.Minute)
 	if err != nil {
+		log.WithError(err).Errorf("Error waiting for pod %s success or timeout.", pod.Name)
+
 		// Trying to get pod log on error.
-		logs, _ = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
+		var logErr error
+		logs, logErr = getPodContainerLog(k8sClientset, namespace, pod.Name, containerName)
+		log.WithError(logErr).Infof("Failed to get log. pod %s container %s.", pod.Name, containerName)
+		return logs, err
 	}
 
-	// Delete pod if everything is fine.
+	// Delete pod if everything is fine. If not, leave pod running to get log manually.
 	err = k8sClientset.CoreV1().Pods(namespace).Delete(pod.Name, &metav1.DeleteOptions{})
 	if err != nil {
 		return logs, err
@@ -256,7 +261,6 @@ func getPodContainerLog(k8sClientSet *kubernetes.Clientset, namespace, podName, 
 		Do().
 		Raw()
 	if err != nil {
-		log.Errorf("failed to get pod log with error %+v", err)
 		return "", err
 	}
 	return string(podLog), err
