@@ -302,7 +302,7 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 		}
 	}
 
-	// At this point, any node would have a "projectcalico.org/node-network-during-migration" lable.
+	// At this point, any node would have a "projectcalico.org/node-network-during-migration" label.
 	// The value is either "flannel" or "calico".
 	// Start IPAM migration.
 	err := c.ipamMigrator.MigrateNodes(nodes)

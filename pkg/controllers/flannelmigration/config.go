@@ -19,6 +19,9 @@ import (
 	"os"
 	"strconv"
 
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/kelseyhightower/envconfig"
 
 	"github.com/joho/godotenv"
@@ -27,8 +30,10 @@ import (
 )
 
 const (
-	flannelEnvFile     = "/host/run/flannel/subnet.env"
-	canalDaemonsetName = "canal"
+	flannelEnvFile        = "/host/run/flannel/subnet.env"
+	canalDaemonsetName    = "canal"
+	calicoConfigMapName   = "calico-config"
+	calicoConfigMapMtuKey = "veth_mtu"
 )
 
 //Flannel migration controller configurations
@@ -39,7 +44,8 @@ type Config struct {
 	FlannelNetwork string `default:"" split_words:"true"`
 
 	// Name of Flannel daemonset in kube-system namespace.
-	// This could be Canal daemonset. Default is kube-flannel-ds-amd64
+	// This could be a Canal daemonset where the controller will autodetect.
+	// Default is kube-flannel-ds-amd64
 	FlannelDaemonsetName string `default:"kube-flannel-ds-amd64" split_words:"true"`
 
 	// FlannelMTU is the mtu used by flannel vxlan tunnel interface.
@@ -80,7 +86,7 @@ type Config struct {
 }
 
 // Parse parses envconfig and stores in Config struct.
-func (c *Config) Parse() error {
+func (c *Config) Parse(k8sClientset *kubernetes.Clientset) error {
 	err := envconfig.Process("", c)
 	if err != nil {
 		return err
@@ -95,14 +101,6 @@ func (c *Config) Parse() error {
 		return err
 	}
 
-	var mtu string
-	if mtu, err = readFlannelEnvFile("FLANNEL_MTU"); err != nil {
-		return err
-	}
-	if c.FlannelMTU, err = strconv.Atoi(mtu); err != nil {
-		return err
-	}
-
 	var masq string
 	if masq, err = readFlannelEnvFile("FLANNEL_IPMASQ"); err != nil {
 		return err
@@ -111,7 +109,38 @@ func (c *Config) Parse() error {
 		return err
 	}
 
+	var mtu string
+	if mtu, err = readFlannelEnvFile("FLANNEL_MTU"); err != nil {
+		return err
+	}
+	if c.FlannelMTU, err = strconv.Atoi(mtu); err != nil {
+		return err
+	}
+
+	// Update calico-config ConfigMap veth_mtu.
+	// So that it could be populated to calico-node pods.
+	err = updateConfigMapValue(k8sClientset, namespaceKubeSystem, calicoConfigMapName, calicoConfigMapMtuKey, mtu)
+	if err != nil {
+		return err
+	}
+
+	// Check if we are running Canal.
+	d := daemonset(canalDaemonsetName)
+	notFound, err := d.CheckNotExists(k8sClientset, namespaceKubeSystem)
+	if err != nil {
+		return err
+	}
+
+	if !notFound {
+		log.Info("Canal daemonset exists, we are migrating from Canal to Calico.")
+		c.FlannelDaemonsetName = canalDaemonsetName
+	}
+
 	return c.ValidateConfig()
+}
+
+func (c *Config) IsRunningCanal() bool {
+	return c.FlannelDaemonsetName == canalDaemonsetName
 }
 
 // Validate Flannel migration controller configurations.

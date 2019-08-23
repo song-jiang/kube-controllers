@@ -163,7 +163,12 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	}
 
 	// Calico daemonset pod should start running now.
-	// TODO do we need to wait for calico node pod ready?
+	err = n.waitPodRunningForNode(m.k8sClientset, namespaceKubeSystem, 1*time.Second, 5*time.Minute, map[string]string{"k8s-app": "calico-node"})
+	if err != nil {
+		log.WithError(err).Errorf("Calico node pod failed on node %s", node.Name)
+		return err
+	}
+	log.Infof("Calico daemonset pod is running on %s.", node.Name)
 
 	// Uncordon node.
 	err = n.Uncordon()
@@ -184,9 +189,6 @@ func (m *networkMigrator) MigrateNodes(nodes []*v1.Node) error {
 		if err != nil {
 			return err
 		}
-
-		// TODO for debug purpose, migrate just one slave node.
-		break
 	}
 	log.Infof("%d nodes completed network migration process.", len(nodes))
 

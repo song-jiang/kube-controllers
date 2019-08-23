@@ -19,6 +19,8 @@ import (
 	"os/exec"
 	"time"
 
+	"k8s.io/apimachinery/pkg/labels"
+
 	"k8s.io/apimachinery/pkg/fields"
 
 	v1 "k8s.io/api/core/v1"
@@ -331,25 +333,39 @@ func (n k8snode) deletePodsForNode(k8sClientset *kubernetes.Clientset, filter fu
 	return nil
 }
 
-// Start deletion process for pods on a node which satisfy a filter.
-func (n k8snode) waitPodsDisappearForNode(k8sClientset *kubernetes.Clientset, interval, timeout time.Duration, filter func(pod *v1.Pod) bool) error {
+// Wait for a pod starting on a node.
+func (n k8snode) waitPodRunningForNode(k8sClientset *kubernetes.Clientset, namespace string, interval, timeout time.Duration, label map[string]string) error {
 	return wait.PollImmediate(interval, timeout, func() (bool, error) {
 		nodeName := string(n)
-		podList, err := k8sClientset.CoreV1().Pods(metav1.NamespaceAll).List(metav1.ListOptions{
-			FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName}).String()})
+		podList, err := k8sClientset.CoreV1().Pods(namespace).List(
+			metav1.ListOptions{
+				FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName}).String(),
+				LabelSelector: labels.SelectorFromSet(label).String(),
+			},
+		)
 		if err != nil {
 			// Something wrong, stop waiting
 			return true, err
 		}
 
-		for _, pod := range podList.Items {
-			if filter(&pod) {
-				// Pod is there, retry.
-				return false, nil
-			}
+		if len(podList.Items) == 0 {
+			// No pod yet, retry
+			return false, nil
 		}
-		// Pod gone, stop waiting
-		return true, nil
+
+		if len(podList.Items) > 1 {
+			// Multiple pods, stop waiting
+			return true, fmt.Errorf("Getting multiple pod with label %v on node %s", label, nodeName)
+		}
+
+		pod := podList.Items[0]
+		if pod.Status.Phase == v1.PodRunning {
+			// Pod running, stop waiting
+			return true, nil
+		}
+
+		// Pod not ready yet, retry
+		return false, nil
 	})
 
 	return nil
@@ -384,7 +400,7 @@ func (n k8snode) Uncordon() error {
 
 func removeLabelForAllNodes(key string) error {
 	log.Infof("Start remove node label %s", key)
-	out, err := exec.Command("/usr/bin/kubectl", "label","node", key+"-", "--all").CombinedOutput()
+	out, err := exec.Command("/usr/bin/kubectl", "label", "node", key+"-", "--all").CombinedOutput()
 	if err != nil {
 		log.Errorf("Remove label node %s. \n ---Remove Node Label Logs--- \n %s \n ------", key, string(out))
 		return err
@@ -403,4 +419,27 @@ func getNodeLabelValue(k8sClientset *kubernetes.Clientset, node *v1.Node, key st
 	}
 
 	return currentVal, nil
+}
+
+// Update a value in ConfigMap.
+func updateConfigMapValue(k8sClientset *kubernetes.Clientset, namespace, name, key, value string) error {
+	configMap, err := k8sClientset.CoreV1().ConfigMaps(namespace).Get(name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	if currentVal, ok := configMap.Data[key]; ok && currentVal == value {
+		log.Infof("Config map %s has %s=%s already. No update needed.", name, key, value)
+		return nil
+	}
+	configMap.Data[key] = value
+
+	_, err = k8sClientset.CoreV1().ConfigMaps(namespace).Update(configMap)
+	if err != nil {
+		return err
+	}
+
+	log.Infof("Config map %s updated %s=%s.", name, key, value)
+	return nil
+
 }

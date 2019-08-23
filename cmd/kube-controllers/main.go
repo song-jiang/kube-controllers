@@ -158,7 +158,7 @@ func main() {
 		case "flannelmigration":
 			// Attempt to load Flannel configuration.
 			flannelConfig := new(flannelmigration.Config)
-			if err := flannelConfig.Parse(); err != nil {
+			if err := flannelConfig.Parse(k8sClientset); err != nil {
 				log.WithError(err).Fatal("Failed to parse Flannel config")
 			}
 			log.WithField("flannelConfig", flannelConfig).Info("Loaded Flannel configuration from environment")
