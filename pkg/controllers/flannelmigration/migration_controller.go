@@ -16,6 +16,7 @@ package flannelmigration
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
@@ -98,6 +99,17 @@ func NewFlannelMigrationController(ctx context.Context, k8sClientset *kubernetes
 	return mc
 }
 
+// Handle error by simply exit 1. Allow controller to restart.
+func (c *flannelMigrationController) HandleError(err error) {
+	log.Fatalf("Migration controller stopped.")
+}
+
+// Migration Completed. Stop controller.
+func (c *flannelMigrationController) StopController(msg string) {
+	log.Infof("%s", msg)
+	os.Exit(0)
+}
+
 // Run starts the migration controller. It does start-of-day preparation
 // and then run entire migration process. We ignore reconcilerPeriod and threadiness.
 func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod string, stopCh chan struct{}) {
@@ -109,11 +121,10 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	shouldMigrate, err := c.CheckShouldMigrate()
 	if err != nil {
 		log.WithError(err).Errorf("Error checking status, Stopping Migration controller.")
-		return
+		c.HandleError(err)
 	}
 	if !shouldMigrate {
-		log.Info("Stopping Migration controller")
-		return
+		c.StopController("No migration needed. Stopping migration controller.")
 	}
 
 	// Start migration process.
@@ -122,7 +133,7 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	err = c.ipamMigrator.InitialiseIPPoolAndFelixConfig()
 	if err != nil {
 		log.WithError(err).Errorf("Error initialising default ipool and Felix configuration.")
-		return
+		c.HandleError(err)
 	}
 
 	// Wait till k8s cache is synced
@@ -137,7 +148,7 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	c.flannelNodes, err = c.runIpamMigrationForNodes()
 	if err != nil {
 		log.WithError(err).Errorf("Error running ipam migration.")
-		return
+		c.HandleError(err)
 	}
 
 	// Add node selector "projectcalico.org/node-network-during-migration==flannel" to Flannel daemonset.
@@ -146,25 +157,24 @@ func (c *flannelMigrationController) Run(threadiness int, reconcilerPeriod strin
 	err = d.AddNodeSelector(c.k8sClientset, namespaceKubeSystem, nodeNetworkFlannel)
 	if err != nil {
 		log.WithError(err).Errorf("Error adding node selector to Flannel daemonset.")
-		return
+		c.HandleError(err)
 	}
 
 	// Start network migration.
 	err = c.runNetworkMigrationForNodes()
 	if err != nil {
 		log.WithError(err).Errorf("Error running network migration.")
-		return
+		c.HandleError(err)
 	}
 
 	// Complete migration process.
 	err = c.completeMigration()
 	if err != nil {
 		log.WithError(err).Errorf("Error completing migration.")
-		return
+		c.HandleError(err)
 	}
 
-	<-stopCh
-	log.Info("All done. Stopping Migration controller")
+	c.StopController("All done. Stopping Migration controller")
 }
 
 // For new node, setup Calico IPAM based on node pod CIDR and update node selector.
