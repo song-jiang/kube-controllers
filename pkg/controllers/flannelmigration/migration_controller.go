@@ -17,6 +17,7 @@ package flannelmigration
 import (
 	"context"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
@@ -299,6 +300,12 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 			}
 		}
 	}
+
+	// Now we have a list of nodes which does not include master node and controllerNode.
+	// We need to sort the list so that, if controller failed and restarted, it will start
+	// to process the same node again. This is to prevent migration controller to migrate another
+	// node without addressing previous failure.
+	sort.SliceStable(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
 
 	if masterNode != nil {
 		log.Infof("Master node %s is last node to be migrated.", masterNode.Name)
