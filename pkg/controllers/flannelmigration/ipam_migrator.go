@@ -389,7 +389,7 @@ func updateDefaultFelixConfigurtion(ctx context.Context, client client.Interface
 	}
 
 	// Do nothing if the correct value has been set.
-	if currentVNI == vni && currentPort == port && currentMTU == mtu && currentVxlanEnabled == true {
+	if currentVNI == vni && currentPort == port && currentMTU == mtu && currentVxlanEnabled {
 		log.Infof("Default Felix configration got correct vxlanEnabled, VNI(%d), port(%d), mtu(%d).", currentVNI, currentPort, currentMTU)
 		return nil
 	}

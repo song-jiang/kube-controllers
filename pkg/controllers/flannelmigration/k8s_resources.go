@@ -371,8 +371,6 @@ func (n k8snode) waitPodRunningForNode(k8sClientset *kubernetes.Clientset, names
 		// Pod not ready yet, retry
 		return false, nil
 	})
-
-	return nil
 }
 
 func (n k8snode) Drain() error {

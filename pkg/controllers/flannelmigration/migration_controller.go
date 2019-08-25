@@ -90,7 +90,6 @@ func NewFlannelMigrationController(ctx context.Context, k8sClientset *kubernetes
 	handlers := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			mc.processNewNode(obj.(*v1.Node))
-			return
 		},
 	}
 
@@ -210,7 +209,6 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 	}
 
 	log.Infof("Complete processing new node %s.", node.Name)
-	return
 }
 
 // Check if controller should start migration process.

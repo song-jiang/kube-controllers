@@ -157,7 +157,7 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 	log.Infof("Deleting non-host-networked pods on %s.", node.Name)
 	// Delete all pods on the node which is not host networked.
 	err = n.deletePodsForNode(m.k8sClientset, func(pod *v1.Pod) bool {
-		return pod.Spec.HostNetwork == false
+		return !pod.Spec.HostNetwork
 	})
 	if err != nil {
 		log.WithError(err).Errorf("failed to delete non-host-networked pods on node %s", node.Name)
@@ -206,7 +206,7 @@ func (m *networkMigrator) MigrateNodes(nodes []*v1.Node) error {
 			if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
 				// Timeout is a valid number
 				n := k8snode(node.Name)
-				n.waitForNodeLabelDisappear(m.k8sClientset, flannelMigrationPauseSecondsKey, 1*time.Second, time.Duration(seconds)*time.Second)
+				_ = n.waitForNodeLabelDisappear(m.k8sClientset, flannelMigrationPauseSecondsKey, 1*time.Second, time.Duration(seconds)*time.Second)
 			}
 		}
 
