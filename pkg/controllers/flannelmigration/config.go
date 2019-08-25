@@ -40,7 +40,7 @@ const (
 type Config struct {
 	// FlannelNetwork should has same value as Flannel "network" config.
 	// This is the IPv4 network in CIDR format used for the entire flannel network.
-	// This is a mandatory config item.
+	// This config item is auto detected from /run/flannel/subnet.env.
 	FlannelNetwork string `default:"" split_words:"true"`
 
 	// Name of Flannel daemonset in kube-system namespace.
@@ -49,18 +49,16 @@ type Config struct {
 	FlannelDaemonsetName string `default:"kube-flannel-ds-amd64" split_words:"true"`
 
 	// FlannelMTU is the mtu used by flannel vxlan tunnel interface.
-	// For example, if flannel VNI is 1, this number can be obtained by running "ip -d link show flannel.1" on one of the host.
-	// Alternatively, it is "FLANNEL_MTU" value of /run/flannel/subnet.env file on the node.
-	// This is a mandatory config item.
+	// This config item is auto detected from /run/flannel/subnet.env.
 	FlannelMTU int `default:"0" split_words:"true"`
+
+	// This option indicates if IP masquerade is enabled for traffic destined for outside the flannel network.
+	// This config item is auto detected from /run/flannel/subnet.env.
+	FlannelIPMasq bool `default:"true" split_words:"true"`
 
 	// The following config items is not mandatory.
 	// The default value is set to be the same default value as Flannel.
 	// If an item is set to a non-default value in existing Flannel network, same value has to be set here.
-
-	// FlannelIPMasq should has same value as Flannel "ip-masq" commandline option.
-	// This option indicates if IP masquerade is enabled for traffic destined for outside the flannel network.
-	FlannelIPMasq bool `default:"true" split_words:"true"`
 
 	// FlannelSubnetLen should has same value as Flannel "SubnetLen" configuration option.
 	// It is the size of the subnet allocated to each host. Default value is 24.
@@ -118,7 +116,7 @@ func (c *Config) Parse(k8sClientset *kubernetes.Clientset) error {
 	}
 
 	// Update calico-config ConfigMap veth_mtu.
-	// So that it could be populated to calico-node pods.
+	// So that it could be populated into calico-node pods.
 	err = updateConfigMapValue(k8sClientset, namespaceKubeSystem, calicoConfigMapName, calicoConfigMapMtuKey, mtu)
 	if err != nil {
 		return err

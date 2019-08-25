@@ -120,7 +120,8 @@ endif
 
 # Makefile configuration options
 BUILD_IMAGE?=calico/kube-controllers
-PUSH_IMAGES?=$(BUILD_IMAGE) quay.io/calico/kube-controllers
+FLANNEL_MIGRATION_BUILD_IMAGE?=calico/flannel-migration-controller
+PUSH_IMAGES?=$(BUILD_IMAGE) quay.io/calico/kube-controllers $(FLANNEL_MIGRATION_IMAGE) quay.io/calico/flannel-migration-controller
 RELEASE_IMAGES?=
 
 # If this is a release, also tag and push additional images.
@@ -160,6 +161,8 @@ clean:
 	rm -rf bin image.created-$(ARCH)
 	-docker rmi $(BUILD_IMAGE)
 	-docker rmi $(BUILD_IMAGE):latest-amd64
+	-docker rmi $(FLANNEL_MIGRATION_BUILD_IMAGE)
+	-docker rmi $(FLANNEL_MIGRATION_BUILD_IMAGE):latest-amd64
 	rm -f tests/fv/fv.test
 	rm -f report/*.xml
 	rm -f tests/crds.yaml
@@ -227,9 +230,12 @@ sub-image-%:
 image.created-$(ARCH): bin/kube-controllers-linux-$(ARCH) bin/check-status-linux-$(ARCH)
 	# Build the docker image for the policy controller.
 	docker build -t $(BUILD_IMAGE):latest-$(ARCH) --build-arg QEMU_IMAGE=$(CALICO_BUILD) -f Dockerfile.$(ARCH) .
+	# Build the docker image for the flannel migration controller.
+	docker build -t $(FLANNEL_MIGRATION_BUILD_IMAGE):latest-$(ARCH) --build-arg QEMU_IMAGE=$(CALICO_BUILD) -f docker-images/flannel-migration/Dockerfile.$(ARCH) .
 ifeq ($(ARCH),amd64)
 	# Need amd64 builds tagged as :latest because Semaphore depends on that
 	docker tag $(BUILD_IMAGE):latest-$(ARCH) $(BUILD_IMAGE):latest
+	docker tag $(FLANNEL_MIGRATION_BUILD_IMAGE):latest-$(ARCH) $(FLANNEL_MIGRATION_BUILD_IMAGE):latest
 endif
 	touch $@
 

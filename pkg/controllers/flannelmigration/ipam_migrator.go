@@ -84,9 +84,9 @@ func (m ipamMigrator) InitialiseIPPoolAndFelixConfig() error {
 		blockSize = m.config.FlannelSubnetLen
 	}
 
-	// Canal has created a default IPPool with no VXLAN.
-	// In this case, we should not check vxlan settings for existing ippool or felix configurations.
-	// Instead, we need to update the default to enable vxlan.
+	// Canal creates default ippool and FelixConfigurations with no VXLAN.
+	// In this case, we should not check vxlan settings for existing ippool or FelixConfigurations.
+	// Instead, we need to update them to enable vxlan.
 	checkVxlan := !m.config.IsRunningCanal()
 
 	// Creating default ippool with vxlan enabled will also create a global felix configuration.

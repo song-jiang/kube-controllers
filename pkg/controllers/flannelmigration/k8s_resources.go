@@ -452,7 +452,7 @@ func updateConfigMapValue(k8sClientset *kubernetes.Clientset, namespace, name, k
 // This is a function for testing purpose.
 func (n k8snode) waitForNodeLabelDisappear(k8sClientset *kubernetes.Clientset, key string, interval, timeout time.Duration) error {
 	nodeName := string(n)
-	log.Infof("Waiting for node %d label %s to disappear.", nodeName, key)
+	log.Infof("Waiting for node %s label %s to disappear.", nodeName, key)
 
 	return wait.PollImmediate(interval, timeout, func() (bool, error) {
 		node, err := k8sClientset.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
