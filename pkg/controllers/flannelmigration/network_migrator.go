@@ -17,6 +17,7 @@ package flannelmigration
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
@@ -33,6 +34,9 @@ const (
 	// Sync period between kubelet and CNI config file change.
 	// see https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/dockershim/network/cni/cni.go#L48
 	defaultSyncConfigPeriod = time.Second * 5
+
+	// For testing
+	flannelMigrationPauseSecondsKey = "projectcalico.org/flannel-migration-pause-seconds"
 )
 
 // networkMigrator responsible for migrating Flannel vxlan data plane to Calico vxlan data plane.
@@ -89,8 +93,16 @@ func (m *networkMigrator) removeFlannelNetworkAndInstallDummyCalicoCNI(node *v1.
 	// It is possible tunnel device or cni0 has been deleted already.
 	dummyCNI := `{ "name": "dummy", "plugins": [{ "type": "flannel-migration-in-progress" }]}`
 
-	cmd := fmt.Sprintf("{ ip link show cni0; ip link show flannel.%d; } || exit 0 && { echo '%s' > /host/%s/%s ; ip link delete cni0 type bridge; ip link delete flannel.%d; } && exit 0 || exit 1",
-		m.config.FlannelVNI, dummyCNI, m.config.CNIConfigDir, m.calicoCNIConfigName, m.config.FlannelVNI)
+	var cmd string
+	if m.config.IsRunningCanal() {
+		// Canal creates tunnel device but with no bridge. It uses Calico CNI.
+		cmd = fmt.Sprintf("ip link show flannel.%d || exit 0 && { echo '%s' > /host/%s/%s ; ip link delete flannel.%d; } && exit 0 || exit 1",
+			m.config.FlannelVNI, dummyCNI, m.config.CNIConfigDir, m.calicoCNIConfigName, m.config.FlannelVNI)
+	} else {
+		// Flannel creates cni0 bridge and tunnel device. It delegates to bridge CNI.
+		cmd = fmt.Sprintf("{ ip link show cni0; ip link show flannel.%d; } || exit 0 && { echo '%s' > /host/%s/%s ; ip link delete cni0 type bridge; ip link delete flannel.%d; } && exit 0 || exit 1",
+			m.config.FlannelVNI, dummyCNI, m.config.CNIConfigDir, m.calicoCNIConfigName, m.config.FlannelVNI)
+	}
 
 	// Run a remove-flannel pod with specified nodeName, this will bypass kube-scheduler.
 	// https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodename
@@ -185,7 +197,20 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 func (m *networkMigrator) MigrateNodes(nodes []*v1.Node) error {
 	log.Infof("Start network migration process for %d nodes.", len(nodes))
 	for _, node := range nodes {
-		err := m.setupCalicoNetworkForNode(node)
+		// This is for testing purpose.
+		// Pause until user remove a pause-seconds label.
+		// This label has to be added to node before running migration controller.
+		val, err := getNodeLabelValue(node, flannelMigrationPauseSecondsKey)
+		if err == nil {
+			// Label exists.
+			if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
+				// Timeout is a valid number
+				n := k8snode(node.Name)
+				n.waitForNodeLabelDisappear(m.k8sClientset, flannelMigrationPauseSecondsKey, 1*time.Second, time.Duration(seconds)*time.Second)
+			}
+		}
+
+		err = m.setupCalicoNetworkForNode(node)
 		if err != nil {
 			return err
 		}

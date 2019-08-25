@@ -188,7 +188,7 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 	}
 
 	// Defensively check node label again to make sure the node has not been processed by anyone.
-	_, err := getNodeLabelValue(c.k8sClientset, node, migrationNodeSelectorKey)
+	_, err := getNodeLabelValue(node, migrationNodeSelectorKey)
 	if err == nil {
 		// Node got label already. Skip it.
 		log.Infof("New node %s has been processed.", node.Name)
@@ -223,7 +223,7 @@ func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
 	}
 
 	if notFound {
-		log.Info("Flannel daemonset not exists, no migration process is needed.")
+		log.Infof("Daemonset %s not exists, no migration process is needed.", c.config.FlannelDaemonsetName)
 		return false, nil
 	}
 
@@ -270,7 +270,7 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 	for _, obj := range items {
 		node := obj.(*v1.Node)
 
-		val, _ := getNodeLabelValue(c.k8sClientset, node, migrationNodeSelectorKey)
+		val, _ := getNodeLabelValue(node, migrationNodeSelectorKey)
 		if val != "calico" {
 			n := k8snode(node.Name)
 			if err := n.addNodeLabels(c.k8sClientset, nodeNetworkFlannel); err != nil {
@@ -288,7 +288,7 @@ func (c *flannelMigrationController) runIpamMigrationForNodes() ([]*v1.Node, err
 			}
 			// check if this node is master node.
 			// If it is, make sure it is the second last node we try to process.
-			_, err := getNodeLabelValue(c.k8sClientset, node, "node-role.kubernetes.io/master")
+			_, err := getNodeLabelValue(node, "node-role.kubernetes.io/master")
 			if err == nil {
 				log.Infof("Master node is %s.", node.Name)
 				masterNode = node

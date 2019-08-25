@@ -416,7 +416,7 @@ func removeLabelForAllNodes(key string) error {
 
 // Get value of a node label.
 // If node does not have that label, return empty string and error.
-func getNodeLabelValue(k8sClientset *kubernetes.Clientset, node *v1.Node, key string) (string, error) {
+func getNodeLabelValue(node *v1.Node, key string) (string, error) {
 	currentVal, ok := node.Labels[key]
 	if !ok {
 		return "", fmt.Errorf("node label (%s) does not exists", key)
@@ -446,4 +446,27 @@ func updateConfigMapValue(k8sClientset *kubernetes.Clientset, namespace, name, k
 	log.Infof("Config map %s updated %s=%s.", name, key, value)
 	return nil
 
+}
+
+// wait for a node label to disappear.
+// This is a function for testing purpose.
+func (n k8snode) waitForNodeLabelDisappear(k8sClientset *kubernetes.Clientset, key string, interval, timeout time.Duration) error {
+	nodeName := string(n)
+	log.Infof("Waiting for node %d label %s to disappear.", nodeName, key)
+
+	return wait.PollImmediate(interval, timeout, func() (bool, error) {
+		node, err := k8sClientset.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+		if err != nil {
+			// Cannot get node, something wrong, stop waiting.
+			return true, err
+		}
+
+		if _, ok := node.Labels[key]; !ok {
+			// Node label gone, stop waiting.
+			return true, nil
+		}
+
+		// retry.
+		return false, nil
+	})
 }
