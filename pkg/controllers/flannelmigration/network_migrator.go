@@ -138,11 +138,6 @@ func (m *networkMigrator) setupCalicoNetworkForNode(node *v1.Node) error {
 		return err
 	}
 
-	// Wait for flannel pod to disappear before we proceed, otherwise it may reinstall Flannel network.
-	//n.waitPodsDisappearForNode(m.k8sClientset, 1*time.Second, 2*time.Minute, func(pod *v1.Pod) bool {
-	//	return true
-	//})
-
 	log.Infof("Removing flannel tunnel device/routes on %s.", node.Name)
 	// Remove Flannel network from node.
 	// Note Flannel vxlan tunnel device (flannel.1) is created by Flannel daemonset pod (not Flannel CNI)
