@@ -11,12 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM debian:10-slim
+FROM scratch
 LABEL maintainer "Song Jiang <song@tigera.io>"
 
-ADD https://storage.googleapis.com/kubernetes-release/release/v1.15.3/bin/linux/amd64/kubectl /usr/bin/kubectl
-RUN chmod +x /usr/bin/kubectl
-
+ADD bin/kubectl-amd64 /usr/bin/kubectl
 ADD bin/kube-controllers-linux-amd64 /usr/bin/kube-controllers
 ADD bin/check-status-linux-amd64 /usr/bin/check-status
 ENTRYPOINT ["/usr/bin/kube-controllers"]

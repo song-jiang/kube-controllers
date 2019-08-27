@@ -110,6 +110,7 @@ OS?=$(shell uname -s | tr A-Z a-z)
 GO_BUILD_VER?=v0.23
 
 K8S_VERSION?=v1.14.1
+KUBECTL_VERSION?=v1.15.3
 HYPERKUBE_IMAGE?=gcr.io/google_containers/hyperkube-$(ARCH):$(K8S_VERSION)
 ETCD_VERSION?=v3.3.7
 ETCD_IMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)-$(BUILDARCH)
@@ -218,6 +219,10 @@ bin/check-status-linux-$(ARCH): local_build $(SRC_FILES)
 	  -v $(CURDIR)/bin:/go/src/$(PACKAGE_NAME)/bin \
 	  $(CALICO_BUILD) go build -v -o bin/check-status-$(OS)-$(ARCH) -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/check-status/
 
+bin/kubectl-$(ARCH):
+	wget https://storage.googleapis.com/kubernetes-release/release/$(KUBECTL_VERSION)/bin/linux/$(ARCH)/kubectl -O $@
+	chmod +x $@
+
 ###############################################################################
 # Building the image
 ###############################################################################
@@ -227,7 +232,7 @@ image-all: $(addprefix sub-image-,$(VALIDARCHES))
 sub-image-%:
 	$(MAKE) image ARCH=$*
 
-image.created-$(ARCH): bin/kube-controllers-linux-$(ARCH) bin/check-status-linux-$(ARCH)
+image.created-$(ARCH): bin/kube-controllers-linux-$(ARCH) bin/check-status-linux-$(ARCH) bin/kubectl-$(ARCH)
 	# Build the docker image for the policy controller.
 	docker build -t $(BUILD_IMAGE):latest-$(ARCH) --build-arg QEMU_IMAGE=$(CALICO_BUILD) -f Dockerfile.$(ARCH) .
 	# Build the docker image for the flannel migration controller.
