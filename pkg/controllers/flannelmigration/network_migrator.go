@@ -201,7 +201,10 @@ func (m *networkMigrator) MigrateNodes(nodes []*v1.Node) error {
 			if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
 				// Timeout is a valid number
 				n := k8snode(node.Name)
-				_ = n.waitForNodeLabelDisappear(m.k8sClientset, flannelMigrationPauseSecondsKey, 1*time.Second, time.Duration(seconds)*time.Second)
+				err = n.waitForNodeLabelDisappear(m.k8sClientset, flannelMigrationPauseSecondsKey, 1*time.Second, time.Duration(seconds)*time.Second)
+				if err != nil {
+					log.WithError(err).Warnf("Error waiting for pause migration label.")
+				}
 			}
 		}
 

@@ -20,7 +20,6 @@ import (
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/kelseyhightower/envconfig"
 
@@ -84,15 +83,16 @@ type Config struct {
 }
 
 // Parse parses envconfig and stores in Config struct.
-func (c *Config) Parse(k8sClientset *kubernetes.Clientset) error {
+func (c *Config) Parse() error {
 	err := envconfig.Process("", c)
 	if err != nil {
 		return err
 	}
 
 	// Work out config items based on env file.
-	if _, err := os.Stat(flannelEnvFile); os.IsNotExist(err) {
-		return fmt.Errorf("Flannel env file %s not exists.", flannelEnvFile)
+	_, err = os.Stat(flannelEnvFile)
+	if err != nil {
+		return err
 	}
 
 	if c.FlannelNetwork, err = readFlannelEnvFile("FLANNEL_NETWORK"); err != nil {
@@ -113,25 +113,6 @@ func (c *Config) Parse(k8sClientset *kubernetes.Clientset) error {
 	}
 	if c.FlannelMTU, err = strconv.Atoi(mtu); err != nil {
 		return err
-	}
-
-	// Update calico-config ConfigMap veth_mtu.
-	// So that it could be populated into calico-node pods.
-	err = updateConfigMapValue(k8sClientset, namespaceKubeSystem, calicoConfigMapName, calicoConfigMapMtuKey, mtu)
-	if err != nil {
-		return err
-	}
-
-	// Check if we are running Canal.
-	d := daemonset(canalDaemonsetName)
-	notFound, err := d.CheckNotExists(k8sClientset, namespaceKubeSystem)
-	if err != nil {
-		return err
-	}
-
-	if !notFound {
-		log.Info("Canal daemonset exists, we are migrating from Canal to Calico.")
-		c.FlannelDaemonsetName = canalDaemonsetName
 	}
 
 	return c.ValidateConfig()
@@ -173,7 +154,8 @@ func (c *Config) ValidateConfig() error {
 func readFlannelEnvFile(key string) (string, error) {
 	items, err := godotenv.Read(flannelEnvFile)
 	if err != nil {
-		return "", fmt.Errorf("Failed to read Flannel env file")
+		log.Errorf("Failed to read Flannel env file.")
+		return "", err
 	}
 
 	if val, ok := items[key]; ok {

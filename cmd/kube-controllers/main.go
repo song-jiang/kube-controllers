@@ -158,7 +158,7 @@ func main() {
 		case "flannelmigration":
 			// Attempt to load Flannel configuration.
 			flannelConfig := new(flannelmigration.Config)
-			if err := flannelConfig.Parse(k8sClientset); err != nil {
+			if err := flannelConfig.Parse(); err != nil {
 				log.WithError(err).Fatal("Failed to parse Flannel config")
 			}
 			log.WithField("flannelConfig", flannelConfig).Info("Loaded Flannel configuration from environment")
@@ -166,7 +166,6 @@ func main() {
 			flannelMigrationController := flannelmigration.NewFlannelMigrationController(ctx, k8sClientset, calicoClient, flannelConfig)
 			controllerCtrl.controllerStates["FlannelMigration"] = &controllerState{
 				controller:  flannelMigrationController,
-				threadiness: config.FlannelMigrationWorkers,
 			}
 		default:
 			log.Fatalf("Invalid controller '%s' provided.", controllerType)

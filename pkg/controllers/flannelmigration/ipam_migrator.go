@@ -308,11 +308,14 @@ func createDefaultVxlanIPPool(ctx context.Context, client client.Interface, cidr
 	if defaultPool.Spec.CIDR != cidr.String() ||
 		defaultPool.Spec.BlockSize != blockSize ||
 		defaultPool.Spec.NATOutgoing != isNATOutgoingEnabled {
+		msg := fmt.Sprintf("current [cidr:%s, blocksize:%d, nat:%t], expected [cidr:%s, blocksize:%d, nat:%t]",
+			defaultPool.Spec.CIDR, defaultPool.Spec.BlockSize, defaultPool.Spec.NATOutgoing,
+			cidr.String(), blockSize, isNATOutgoingEnabled)
 		log.Errorf("Failed to validate existing default IPv4 IP pool (cidr/blocksize/nat) %+v", defaultPool.Spec)
 		return cerrors.ErrorValidation{
 			ErroredFields: []cerrors.ErroredField{{
 				Name:   "pool.Spec",
-				Reason: "Failed to validate existing default IPv4 IP pool",
+				Reason: msg,
 			}},
 		}
 	}

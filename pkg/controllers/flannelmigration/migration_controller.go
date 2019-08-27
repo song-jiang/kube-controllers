@@ -213,9 +213,21 @@ func (c *flannelMigrationController) processNewNode(node *v1.Node) {
 
 // Check if controller should start migration process.
 func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
-	// Check Flannel daemonset.
-	d := daemonset(c.config.FlannelDaemonsetName)
+	// Check if we are running Canal.
+	d := daemonset(canalDaemonsetName)
 	notFound, err := d.CheckNotExists(c.k8sClientset, namespaceKubeSystem)
+	if err != nil {
+		return false, err
+	}
+
+	if !notFound {
+		log.Info("Canal daemonset exists, we are migrating from Canal to Calico.")
+		c.config.FlannelDaemonsetName = canalDaemonsetName
+	}
+
+	// Check Flannel daemonset.
+	d = daemonset(c.config.FlannelDaemonsetName)
+	notFound, err = d.CheckNotExists(c.k8sClientset, namespaceKubeSystem)
 	if err != nil {
 		return false, err
 	}
@@ -223,6 +235,13 @@ func (c *flannelMigrationController) CheckShouldMigrate() (bool, error) {
 	if notFound {
 		log.Infof("Daemonset %s not exists, no migration process is needed.", c.config.FlannelDaemonsetName)
 		return false, nil
+	}
+
+	// Update calico-config ConfigMap veth_mtu.
+	// So that it could be populated into calico-node pods.
+	err = updateConfigMapValue(c.k8sClientset, namespaceKubeSystem, calicoConfigMapName, calicoConfigMapMtuKey, string(c.config.FlannelMTU))
+	if err != nil {
+		return false, err
 	}
 
 	// Initialise IPAM migrator.
