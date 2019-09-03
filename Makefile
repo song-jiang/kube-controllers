@@ -372,10 +372,34 @@ fv: remote-deps tests/fv/fv.test image
 		GO111MODULE=on \
 		./fv.test $(GINKGO_ARGS) -ginkgo.slowSpecThreshold 30
 
-tests/fv/fv.test: local_build $(shell find ./tests -type f -name '*.go' -print)
+tests/fv/fv.test: local_build $(shell find ./tests/fv ./tests/testutils -type f -name '*.go' -print)
 	# We pre-build the test binary so that we can run it outside a container and allow it
 	# to interact with docker.
 	$(DOCKER_RUN) $(CALICO_BUILD) go test ./tests/fv -c --tags fvtests -o tests/fv/fv.test
+
+.PHONY: st
+## Build and run the ST tests.
+st: remote-deps tests/st/st.test test/st/kind image
+	@echo Running Go STs.
+	cd tests/st && ETCD_IMAGE=$(ETCD_IMAGE) \
+		HYPERKUBE_IMAGE=$(HYPERKUBE_IMAGE) \
+		CONTAINER_NAME=$(BUILD_IMAGE):latest-$(ARCH) \
+		PRIVATE_KEY=`pwd`/private.key \
+		CRDS_FILE=${PWD}/tests/crds.yaml \
+		GO111MODULE=on \
+		./st.test $(GINKGO_ARGS) -ginkgo.slowSpecThreshold 30
+
+tests/st/st.test: local_build $(shell find ./tests/st ./tests/testutils -type f -name '*.go' -print)
+	# We pre-build the test binary so that we can run it outside a container and allow it
+	# to interact with docker.
+	$(DOCKER_RUN) $(CALICO_BUILD) go test ./tests/st -c --tags sttests -o tests/st/st.test
+
+tests/st/kind:
+	# Install kind to create cluster
+	curl -Lo ./kind https://github.com/kubernetes-sigs/kind/releases/download/v0.5.1/kind-$(shell uname)-$(ARCH)
+	chmod +x ./kind
+	mv ./kind tests/st/kind
+
 
 ###############################################################################
 # CI
